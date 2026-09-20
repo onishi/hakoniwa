@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>hakoniwa</title>
+    <style>
+      :root {
+        --bg: #f6f7f3;
+        --fg: #23281f;
+        --muted: #5f6b57;
+        --accent: #4a7c3f;
+        --card: #ffffff;
+        --border: #dfe3d8;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #14170f;
+          --fg: #e8ece2;
+          --muted: #9aa691;
+          --accent: #8fc07e;
+          --card: #1d2117;
+          --border: #2e3427;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 48px 16px;
+        background: var(--bg);
+        color: var(--fg);
+        font-family: system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
+        line-height: 1.7;
+        display: flex;
+        justify-content: center;
+      }
+      main { width: 100%; max-width: 640px; }
+      h1 { font-size: 2rem; margin: 0 0 4px; letter-spacing: 0.02em; }
+      .sub { color: var(--muted); margin: 0 0 32px; }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 20px 24px;
+        margin-bottom: 16px;
+      }
+      h2 { font-size: 0.95rem; margin: 0 0 12px; color: var(--muted); font-weight: 600; }
+      code {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        padding: 1px 6px;
+        font-size: 0.9em;
+      }
+      button {
+        background: var(--accent);
+        color: var(--bg);
+        border: 0;
+        border-radius: 8px;
+        padding: 9px 18px;
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button:hover { opacity: 0.88; }
+      pre {
+        margin: 14px 0 0;
+        padding: 12px 14px;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        overflow-x: auto;
+        font-size: 0.85rem;
+      }
+      footer { color: var(--muted); font-size: 0.85rem; margin-top: 32px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>🌿 hakoniwa</h1>
+      <p class="sub">Cloudflare Workers 上で動く箱庭です。</p>
+
+      <div class="card">
+        <h2>API を試す</h2>
+        <p><code>GET /api/hello</code> が JSON を返します。</p>
+        <button id="run">リクエストを送る</button>
+        <pre id="out">(まだ実行していません)</pre>
+      </div>
+
+      <footer>Served by Cloudflare Workers · static assets + Worker routing</footer>
+    </main>
+
+    <script>
+      const out = document.getElementById("out");
+      document.getElementById("run").addEventListener("click", async () => {
+        out.textContent = "読み込み中...";
+        try {
+          const res = await fetch("/api/hello");
+          out.textContent = JSON.stringify(await res.json(), null, 2);
+        } catch (err) {
+          out.textContent = "エラー: " + err;
+        }
+      });
+    </script>
+  </body>
+</html>
