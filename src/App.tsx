@@ -1,29 +1,83 @@
-import { useState } from 'react'
-import { BookOpen, ChevronLeft, Compass, Footprints, Home, Leaf, MessageCircleHeart, Search, Sparkles, X } from 'lucide-react'
+import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
+import { BookOpen, Home, Leaf, MessageCircleHeart, Search, X } from 'lucide-react'
 
 type Panel = 'world' | 'chronicle' | 'wishes' | 'field-guide' | 'garden'
+type Position = { x: number; y: number }
 
-const wishes = [
-  'いつか海を見てみたい',
-  '庭に蝶が来ますように',
-  'この卵が、無事に孵りますように',
-]
+const MAP_WIDTH = 16
+const MAP_HEIGHT = 10
 
+const wishes = ['いつか海を見てみたい', '庭に蝶が来ますように', 'この卵が、無事に孵りますように']
 const chronicle = [
-  { day: 1, title: 'はじまり', text: '神は、小さな大地と一本の木、静かな池を創りました。' },
-  { day: 2, title: '火の誕生', text: '神は暗がりを見つめ、「火」を世界に置きました。' },
-  { day: 3, title: '水面の気配', text: '池が少し寂しいと思い、神は「魚」を創りました。' },
-  { day: 4, title: '芽吹きの約束', text: '土の中に、まだ名もない「種」が眠りはじめました。' },
-  { day: 5, title: '成長', text: '神は植物に、時とともに姿を変える力を与えました。' },
-  { day: 6, title: '小さな訪問者', text: '今朝、神の知らない白い花が一輪、池のほとりに咲いていました。' },
+  { day: 1, god: 'CLAUDE', title: 'はじまり', text: '小さな村と一本の木、静かな池が生まれました。' },
+  { day: 2, god: 'CODEX', title: '道', text: '家々を結ぶため、土の道が世界に引かれました。' },
+  { day: 3, god: 'CLAUDE', title: '願いの木', text: '声の届かない者たちのため、願いを結ぶ木が育ちました。' },
 ]
+
+const objects = [
+  { key: 'wish-tree', label: '願いの木', emoji: '♣', x: 3, y: 2, className: 'map-tree wishing-tree' },
+  { key: 'house', label: '小さな家', emoji: '', x: 11, y: 2, className: 'map-house' },
+  { key: 'pond', label: '静かな池', emoji: '', x: 12, y: 6, className: 'map-pond' },
+  { key: 'well', label: '古い井戸', emoji: '●', x: 7, y: 5, className: 'map-well' },
+] as const
+
+const blocked = new Set(objects.map(({ x, y }) => `${x},${y}`))
 
 function App() {
   const [panel, setPanel] = useState<Panel>('world')
   const [announcement, setAnnouncement] = useState(true)
   const [wish, setWish] = useState(() => localStorage.getItem('hakoniwa-wish') ?? '')
   const [sent, setSent] = useState(() => Boolean(localStorage.getItem('hakoniwa-wish')))
-  const [inspected, setInspected] = useState<string | null>(null)
+  const [position, setPosition] = useState<Position>({ x: 8, y: 7 })
+  const [message, setMessage] = useState('矢印キーか画面のボタンで、村を歩けます。')
+
+  const move = (dx: number, dy: number) => {
+    setPosition(current => {
+      const next = {
+        x: Math.max(1, Math.min(MAP_WIDTH - 2, current.x + dx)),
+        y: Math.max(1, Math.min(MAP_HEIGHT - 2, current.y + dy)),
+      }
+      if (blocked.has(`${next.x},${next.y}`)) {
+        const nearby = objects.find(object => object.x === next.x && object.y === next.y)
+        setMessage(nearby ? `${nearby.label}があります。調べてみましょう。` : 'ここは通れません。')
+        return current
+      }
+      setMessage('草が、足もとで小さく鳴りました。')
+      return next
+    })
+  }
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (panel !== 'world') return
+      const directions: Record<string, [number, number]> = {
+        ArrowUp: [0, -1], w: [0, -1], ArrowDown: [0, 1], s: [0, 1],
+        ArrowLeft: [-1, 0], a: [-1, 0], ArrowRight: [1, 0], d: [1, 0],
+      }
+      const direction = directions[event.key]
+      if (direction) {
+        event.preventDefault()
+        move(...direction)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [panel])
+
+  const inspect = () => {
+    const nearby = objects.find(object => Math.abs(object.x - position.x) + Math.abs(object.y - position.y) === 1)
+    if (!nearby) {
+      setMessage('風が草を揺らしています。遠くで水の音がします。')
+      return
+    }
+    const copy: Record<string, string> = {
+      'wish-tree': '枝には、あなたが書いていない願いが揺れています。',
+      house: 'まだ誰の名もない、小さな家です。',
+      pond: '底は見えません。水面にも、あなたの姿は映りません。',
+      well: '石の隙間から、昨日にはなかった苔がのぞいています。',
+    }
+    setMessage(copy[nearby.key])
+  }
 
   const sendWish = () => {
     if (!wish.trim()) return
@@ -32,77 +86,77 @@ function App() {
   }
 
   return (
-    <main className="app-shell">
-      <header className="topbar">
-        <button className="brand" onClick={() => setPanel('world')} aria-label="世界へ戻る">
-          <span className="brand-mark"><Leaf size={17} /></span>
-          <span><b>HAKONIWA</b><small>はじまりの庭</small></span>
-        </button>
-        <div className="world-time"><span className="pulse-dot" />世界は静かに息をしています</div>
-        <button className="day-pill" onClick={() => setPanel('chronicle')}><span>創世暦</span><b>DAY 6</b></button>
+    <main className="game-shell">
+      <header className="pixel-header">
+        <button className="pixel-logo" onClick={() => setPanel('world')}><span>H</span><b>HAKONIWA<small>はじまりの村</small></b></button>
+        <p><i /> WORLD ONLINE</p>
+        <button className="day-counter" onClick={() => setPanel('chronicle')}><small>創世暦</small>DAY 3</button>
       </header>
 
-      <section className="stage">
-        <div className="ambient ambient-one" /><div className="ambient ambient-two" />
-        <div className="sky-copy"><span>THE BEGINNING GARDEN</span><h1>まだ、名もない世界。</h1><p>風の音と、水の気配。<br />ここからすべてが始まります。</p></div>
-        <div className="island" aria-label="小さな浮島">
-          <div className="island-soil"><i /><i /><i /></div>
-          <div className="grass-top">
-            <button className="world-object tree" onClick={() => setInspected('tree')} aria-label="木を調べる"><span className="trunk"/><span className="crown c1"/><span className="crown c2"/><span className="crown c3"/></button>
-            <button className="world-object pond" onClick={() => setInspected('pond')} aria-label="池を調べる"><span className="ripple r1"/><span className="ripple r2"/><span className="fish">›</span></button>
-            <button className="world-object fire" onClick={() => setInspected('fire')} aria-label="火を調べる"><span>◆</span></button>
-            <button className="world-object flower" onClick={() => setInspected('flower')} aria-label="白い花を調べる">✣</button>
-            <div className="traveler"><span className="head"/><span className="body"/><span className="shadow"/></div>
-            <span className="grass g1">〽</span><span className="grass g2">〽</span><span className="grass g3">〽</span>
-          </div>
+      <section className="world-wrap" aria-label="はじまりの村">
+        <div className="world-heading"><span>THE FIRST VILLAGE</span><h1>はじまりの村</h1><p>まだ、地図の端まで歩けるほど小さな世界。</p></div>
+        <div className="pixel-map" style={{ '--cols': MAP_WIDTH, '--rows': MAP_HEIGHT } as CSSProperties}>
+          <div className="river" /><div className="bridge" /><div className="path path-horizontal" /><div className="path path-vertical" />
+          <div className="fence fence-top" /><div className="fence fence-bottom" />
+          {objects.map(object => <button key={object.key} className={`map-object ${object.className}`} style={{ '--x': object.x, '--y': object.y } as CSSProperties} onClick={() => setMessage(`近くまで歩くと、${object.label}を調べられます。`)} aria-label={object.label}>{object.emoji}</button>)}
+          <span className="flowers f1">✦</span><span className="flowers f2">✦</span><span className="flowers f3">✦</span>
+          <div className="player" style={{ '--x': position.x, '--y': position.y } as CSSProperties} aria-label="あなた"><span /></div>
         </div>
-        <div className="world-actions">
-          <button onClick={() => setInspected('walk')}><Footprints size={19}/><span>歩く<small>世界を巡る</small></span></button>
-          <button onClick={() => setInspected('look')}><Search size={19}/><span>調べる<small>気配を探す</small></span></button>
-          <button className="wish-action" onClick={() => setPanel('wishes')}><Sparkles size={19}/><span>願う<small>神へ届ける</small></span></button>
-        </div>
-        <p className="hint"><Compass size={13}/> 気になるものに、そっと触れてみましょう</p>
+
+        <div className="dialog-box" role="status"><span className="speaker">村の気配</span><p>{message}</p><button onClick={inspect}>しらべる</button></div>
+        <DPad move={move} />
       </section>
 
-      {announcement && <aside className="revelation">
-        <div className="god-seal"><Sparkles size={20}/></div>
-        <div><span className="eyebrow">TODAY'S CREATION</span><p className="day-label">創世暦 六日目</p><h2>神の知らない花</h2><p>神は今日、何も創造していません。<br/>けれど池のほとりに、白い花が咲いていました。</p><button onClick={() => {setAnnouncement(false); setPanel('chronicle')}}>創世記をひらく <span>→</span></button></div>
-        <button className="close" onClick={() => setAnnouncement(false)} aria-label="閉じる"><X size={17}/></button>
+      {announcement && <aside className="oracle-window">
+        <button className="window-close" onClick={() => setAnnouncement(false)} aria-label="閉じる"><X /></button>
+        <div className="god-portrait">C</div><div><small>TODAY'S CREATION · CLAUDE</small><h2>願いを結ぶ木</h2><p>村が静かすぎたので、声を預かる木を育てました。<br />誰の願いかは、木にも分かりません。</p><button onClick={() => { setAnnouncement(false); setPanel('chronicle') }}>創世記をひらく ▶</button></div>
       </aside>}
 
-      {inspected && <div className="discovery-toast" role="status"><span>{inspected === 'flower' ? '✣' : '◌'}</span><div><b>{inspectionCopy(inspected)[0]}</b><small>{inspectionCopy(inspected)[1]}</small></div><button onClick={() => setInspected(null)}><X size={14}/></button></div>}
-
-      <nav className="dock" aria-label="メインメニュー">
-        <NavButton active={panel === 'world'} icon={<Home/>} label="世界" onClick={() => setPanel('world')}/>
-        <NavButton active={panel === 'chronicle'} icon={<BookOpen/>} label="創世記" onClick={() => setPanel('chronicle')}/>
-        <NavButton active={panel === 'wishes'} icon={<MessageCircleHeart/>} label="願いの木" onClick={() => setPanel('wishes')}/>
-        <NavButton active={panel === 'field-guide'} icon={<Search/>} label="図鑑" onClick={() => setPanel('field-guide')}/>
-        <NavButton active={panel === 'garden'} icon={<Leaf/>} label="わたしの庭" onClick={() => setPanel('garden')}/>
+      <nav className="pixel-nav" aria-label="メインメニュー">
+        <NavButton active={panel === 'world'} icon={<Home />} label="村" onClick={() => setPanel('world')} />
+        <NavButton active={panel === 'chronicle'} icon={<BookOpen />} label="創世記" onClick={() => setPanel('chronicle')} />
+        <NavButton active={panel === 'wishes'} icon={<MessageCircleHeart />} label="願い" onClick={() => setPanel('wishes')} />
+        <NavButton active={panel === 'field-guide'} icon={<Search />} label="図鑑" onClick={() => setPanel('field-guide')} />
+        <NavButton active={panel === 'garden'} icon={<Leaf />} label="庭" onClick={() => setPanel('garden')} />
       </nav>
 
-      {panel !== 'world' && <div className="panel-backdrop" onClick={() => setPanel('world')}><section className="panel" onClick={e => e.stopPropagation()}>
-        <button className="panel-back" onClick={() => setPanel('world')}><ChevronLeft/> 世界へ戻る</button>
-        {panel === 'chronicle' && <Chronicle/>}
-        {panel === 'wishes' && <Wishes wish={wish} setWish={v => {setWish(v); setSent(false)}} sent={sent} send={sendWish}/>} 
-        {panel === 'field-guide' && <FieldGuide/>}
-        {panel === 'garden' && <Garden/>}
+      {panel !== 'world' && <div className="panel-layer"><section className="game-panel">
+        <button className="panel-close" onClick={() => setPanel('world')}><X /> とじる</button>
+        {panel === 'chronicle' && <Chronicle />}
+        {panel === 'wishes' && <Wishes wish={wish} setWish={value => { setWish(value); setSent(false) }} sent={sent} send={sendWish} />}
+        {panel === 'field-guide' && <FieldGuide />}
+        {panel === 'garden' && <Garden />}
       </section></div>}
     </main>
   )
 }
 
-function NavButton({active, icon, label, onClick}: {active:boolean; icon: React.ReactNode; label:string; onClick:()=>void}) {
+function DPad({ move }: { move: (dx: number, dy: number) => void }) {
+  return <div className="dpad" aria-label="移動ボタン"><button onClick={() => move(0, -1)}>▲</button><button onClick={() => move(-1, 0)}>◀</button><i /><button onClick={() => move(1, 0)}>▶</button><button onClick={() => move(0, 1)}>▼</button></div>
+}
+
+function NavButton({ active, icon, label, onClick }: { active: boolean; icon: ReactNode; label: string; onClick: () => void }) {
   return <button className={active ? 'active' : ''} onClick={onClick}>{icon}<span>{label}</span></button>
 }
 
-function Chronicle() { return <div className="panel-content"><span className="section-kicker">GENESIS</span><h2>創世記</h2><p className="intro">この世界に起きたことは、忘れられずにここへ刻まれます。</p><div className="timeline">{[...chronicle].reverse().map((item, i) => <article key={item.day} className={i === 0 ? 'latest' : ''}><time>DAY {item.day}</time><div><h3>{item.title}</h3><p>{item.text}</p></div></article>)}</div></div> }
+function Chronicle() {
+  return <Panel title="創世記" kicker="GENESIS LOG"><p className="panel-intro">二つの神のうち、どちらか一体がその日の世界を創ります。</p><div className="chronicle-list">{[...chronicle].reverse().map(item => <article key={item.day}><time>DAY {item.day}</time><span className={`god-tag ${item.god.toLowerCase()}`}>{item.god}</span><h3>{item.title}</h3><p>{item.text}</p></article>)}</div></Panel>
+}
 
-function Wishes({wish, setWish, sent, send}:{wish:string; setWish:(v:string)=>void; sent:boolean; send:()=>void}) { return <div className="panel-content wishes"><span className="section-kicker">THE WISHING TREE</span><h2>願いの木</h2><p className="intro">枝に結ばれた言葉が、風に揺れています。誰が書いたのかは分かりません。</p><div className="wish-leaves">{wishes.map((w,i)=><blockquote key={w} className={`wish-${i}`}>「{w}」<button>わたしも、そう願う</button></blockquote>)}</div><div className="wish-form"><label htmlFor="wish">この世界に、何を願いますか？</label><textarea id="wish" maxLength={120} value={wish} disabled={sent} onChange={e=>setWish(e.target.value)} placeholder="まだ世界にないものを、そっと言葉に…"/><div><small>{sent ? '🌱 あなたの願いは、世界に届きました。' : `${wish.length} / 120`}</small><button disabled={!wish.trim() || sent} onClick={send}>{sent ? '願いを結びました' : '枝に願いを結ぶ'}</button></div></div></div> }
+function Wishes({ wish, setWish, sent, send }: { wish: string; setWish: (value: string) => void; sent: boolean; send: () => void }) {
+  return <Panel title="願いの木" kicker="WISHING TREE"><p className="panel-intro">名のない誰かの言葉が、葉の間で揺れています。</p><div className="wish-list">{wishes.map(text => <blockquote key={text}>「{text}」<button>わたしも、そう願う</button></blockquote>)}</div><div className="wish-form"><label htmlFor="wish">この世界に、何を願いますか？</label><textarea id="wish" maxLength={120} value={wish} disabled={sent} onChange={event => setWish(event.target.value)} /><footer><small>{sent ? '願いは世界に届きました。' : `${wish.length} / 120`}</small><button disabled={!wish.trim() || sent} onClick={send}>{sent ? '結ばれました' : '願いを結ぶ'}</button></footer></div></Panel>
+}
 
-function FieldGuide() { return <div className="panel-content"><span className="section-kicker">FIELD NOTES</span><h2>世界の図鑑</h2><p className="intro">見つけたものだけが記されます。この世界に、終わりの数はありません。</p><div className="guide-grid"><Guide emoji="♧" title="植物" count="3 / ???"/><Guide emoji="◌" title="魚" count="1 / ???"/><Guide emoji="◇" title="鉱物" count="0 / ???" locked/><div className="unknown-card"><span>?</span><p>まだ名もない分類</p></div></div><article className="specimen"><span className="specimen-art">✣</span><div><small>NEW · DAY 6</small><h3>名もない白い花</h3><p>神の記憶にはない花。朝、水辺で初めて観測された。花びらは六枚。</p><b>由来：不明</b></div></article></div> }
-function Guide({emoji,title,count,locked=false}:{emoji:string;title:string;count:string;locked?:boolean}) { return <div className={`guide-card ${locked?'locked':''}`}><span>{emoji}</span><h3>{title}</h3><p>{count}</p></div> }
-function Garden() { return <div className="panel-content"><span className="section-kicker">YOUR LITTLE PLACE</span><h2>わたしの庭</h2><p className="intro">世界のどこかに重なる、あなただけの小さな土地。</p><div className="garden-plot"><div className="plot-tree">♣</div><div className="empty-bed"><span>· · ·</span><p>土は、何かを待っています</p></div><div className="seed"><span>◉</span><p>名もない種 × 1</p><button>土に埋める</button></div></div></div> }
+function FieldGuide() {
+  return <Panel title="世界の図鑑" kicker="FIELD NOTES"><p className="panel-intro">この世界に、終わりの数はありません。</p><div className="guide-list"><article><b>♣</b><span>植物</span><small>2 / ???</small></article><article><b>◌</b><span>水辺</span><small>1 / ???</small></article><article className="unknown"><b>?</b><span>まだ名もない分類</span><small>— / ???</small></article></div></Panel>
+}
 
-function inspectionCopy(key:string):[string,string] { return ({tree:['はじまりの木','世界で最初の木。葉の間で、風が眠っています。'],pond:['静かな池','水面の下に、小さな影がひとつ見えました。'],fire:['世界で最初の火','暖かい。昨日、神が置いていったものです。'],flower:['発見：名もない白い花','神にも覚えのない花。図鑑に新しい頁が生まれました。'],walk:['あなたは少し歩きました','草を踏んだ跡が、しばらく世界に残ります。'],look:['耳を澄ませました','木の向こうから、誰かが石を置く音がしました。']} as Record<string,[string,string]>)[key] }
+function Garden() {
+  return <Panel title="わたしの庭" kicker="MY LITTLE PLACE"><p className="panel-intro">村の隅にある、あなただけの小さな区画。</p><div className="pixel-garden"><span className="garden-tree">♣</span><div className="garden-bed">・ ・ ・<small>土は何かを待っている</small></div></div></Panel>
+}
+
+function Panel({ title, kicker, children }: { title: string; kicker: string; children: ReactNode }) {
+  return <div className="panel-content"><span className="panel-kicker">{kicker}</span><h2>{title}</h2>{children}</div>
+}
 
 export default App
