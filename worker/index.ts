@@ -111,7 +111,7 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
   }
 
   if (url.pathname === '/api/diary' && request.method === 'GET') {
-    const entries = await env.DB.prepare(`SELECT world_day AS worldDay, god, body,
+    const entries = await env.DB.prepare(`SELECT world_day AS worldDay, body,
       CASE WHEN screenshot_key IS NULL THEN NULL ELSE '/api/screenshots/' || world_day END AS screenshotUrl,
       published_at AS publishedAt FROM genesis_diary ORDER BY world_day DESC`).all()
     return json({ entries: entries.results })

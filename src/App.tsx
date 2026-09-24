@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from 're
 type Position = { x: number; y: number }
 type Direction = 'up' | 'down' | 'left' | 'right'
 type Panel = 'diary' | 'wish' | 'account' | null
-type DiaryEntry = { worldDay: number; god: 'CODEX' | 'CLAUDE'; body: string; screenshotUrl: string | null }
+type DiaryEntry = { worldDay: number; body: string; screenshotUrl: string | null }
 type SessionUser = { name: string; avatarUrl: string | null }
 
 type WorldObject = {
@@ -53,7 +53,7 @@ function App() {
   const [panel, setPanel] = useState<Panel>(null)
   const [user, setUser] = useState<SessionUser | null>(null)
   const [diary, setDiary] = useState<DiaryEntry[]>([
-    { worldDay: 1, god: 'CLAUDE', body: '土と木と池を創りました。あなたが来てくれて、うれしい。', screenshotUrl: null },
+    { worldDay: 1, body: '土と木と池を創りました。あなたが来てくれて、うれしい。', screenshotUrl: null },
   ])
   const [wish, setWish] = useState('')
   const [wishStatus, setWishStatus] = useState('')
@@ -198,7 +198,7 @@ function App() {
           {panel === 'diary' && <>
             <h1>創世日記</h1>
             {diary.map(entry => <article className="diary-entry" key={entry.worldDay}>
-              <p className="entry-meta">DAY {entry.worldDay} / {entry.god}</p>
+              <p className="entry-meta">DAY {entry.worldDay}</p>
               {entry.screenshotUrl && <img src={entry.screenshotUrl} alt={`DAY ${entry.worldDay}の世界`} />}
               <p>{entry.body}</p>
             </article>)}
