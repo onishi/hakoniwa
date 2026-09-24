@@ -59,6 +59,7 @@ function App() {
   const [wishStatus, setWishStatus] = useState('')
   const [publicConsent, setPublicConsent] = useState(false)
   const saveTimer = useRef<number | undefined>(undefined)
+  const lastKeyboardMove = useRef(0)
   const captureMode = new URLSearchParams(location.search).has('capture')
 
   const move = useCallback((nextDirection: Direction) => {
@@ -89,8 +90,11 @@ function App() {
 
       if (nextDirection) {
         event.preventDefault()
+        const now = performance.now()
+        if (event.repeat && now - lastKeyboardMove.current < 180) return
+        lastKeyboardMove.current = now
         move(nextDirection)
-      } else if (event.code === 'Space') {
+      } else if (event.code === 'Space' && !event.repeat) {
         event.preventDefault()
         act()
       }
