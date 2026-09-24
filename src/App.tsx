@@ -15,6 +15,7 @@ type WorldObject = {
   className: string
   message: string
   label: string
+  panel?: Exclude<Panel, null>
 }
 
 const MAP_WIDTH = 16
@@ -24,6 +25,7 @@ const objects: WorldObject[] = [
   { key: 'tree', x: 4, y: 3, className: 'map-tree', message: '世界で最初の木。葉の間で、風が眠っています。', label: 'はじまりの木' },
   { key: 'house', x: 11, y: 3, width: 2, height: 2, className: 'map-house', message: '小さな家です。中には、まだ誰もいません。', label: '小さな家' },
   { key: 'well', x: 7, y: 5, className: 'map-well', message: '古い井戸です。水の音はしません。', label: '古い井戸' },
+  { key: 'wish-tree', x: 3, y: 7, className: 'map-wish-tree', message: '願いを、ひとつだけ。', label: '願いの木', panel: 'wish' },
   { key: 'pond', x: 12, y: 7, width: 3, height: 2, className: 'map-pond', message: '底はまだ見えません。生き物の気配はありません。', label: '静かな池' },
 ]
 
@@ -75,6 +77,7 @@ function App() {
     const vector = directionVectors[direction]
     const target = occupiedTiles.get(`${position.x + vector.x},${position.y + vector.y}`)
     setMessage(target?.message ?? '柔らかな土です。けれど、植えるものはまだありません。')
+    if (target?.panel) setPanel(target.panel)
   }, [direction, position])
 
   useEffect(() => {
@@ -140,7 +143,6 @@ function App() {
       <section className="world" aria-label="はじまりの庭 Day 1">
         <nav className="world-actions" aria-label="世界の記録">
           <button onClick={() => setPanel('diary')} aria-label="創世日記">▤</button>
-          <button onClick={() => setPanel('wish')} aria-label="願い事">☆</button>
           <button onClick={() => setPanel('account')} aria-label="アカウント">●</button>
         </nav>
         <div className="pixel-map" style={{ '--cols': MAP_WIDTH, '--rows': MAP_HEIGHT } as CSSProperties}>
