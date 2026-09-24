@@ -16,17 +16,22 @@ type WorldObject = {
   message: string
   label: string
   panel?: Exclude<Panel, null>
+  /** Flat ground-level features (no standing silhouette) sit in the ground layer instead of the depth-sorted layer. */
+  flat?: boolean
 }
 
-const MAP_WIDTH = 16
-const MAP_HEIGHT = 10
+const MAP_WIDTH = 12
+const MAP_HEIGHT = 12
+const WALK_MIN = 1
+const WALK_MAX_X = MAP_WIDTH - 2
+const WALK_MAX_Y = MAP_HEIGHT - 2
 
 const objects: WorldObject[] = [
-  { key: 'tree', x: 4, y: 3, className: 'map-tree', message: '世界で最初の木。葉の間で、風が眠っています。', label: 'はじまりの木' },
-  { key: 'house', x: 11, y: 3, width: 2, height: 2, className: 'map-house', message: '小さな家です。中には、まだ誰もいません。', label: '小さな家' },
-  { key: 'well', x: 7, y: 5, className: 'map-well', message: '古い井戸です。水の音はしません。', label: '古い井戸' },
-  { key: 'wish-tree', x: 3, y: 7, className: 'map-wish-tree', message: '願いを、ひとつだけ。', label: '願いの木', panel: 'wish' },
-  { key: 'pond', x: 12, y: 7, width: 3, height: 2, className: 'map-pond', message: '底はまだ見えません。生き物の気配はありません。', label: '静かな池' },
+  { key: 'tree', x: 3, y: 3, className: 'map-tree', message: '世界で最初の木。葉の間で、風が眠っています。', label: 'はじまりの木' },
+  { key: 'house', x: 7, y: 2, width: 2, height: 2, className: 'map-house', message: '小さな家です。中には、まだ誰もいません。', label: '小さな家' },
+  { key: 'well', x: 5, y: 6, className: 'map-well', message: '古い井戸です。水の音はしません。', label: '古い井戸' },
+  { key: 'wish-board', x: 2, y: 8, className: 'map-wish-board', message: '願いを、ひとつだけ。', label: '願いの掲示板', panel: 'wish' },
+  { key: 'pond', x: 7, y: 7, width: 3, height: 2, className: 'map-pond', message: '底はまだ見えません。生き物の気配はありません。', label: '静かな池', flat: true },
 ]
 
 const occupiedTiles = new Map<string, WorldObject>()
@@ -39,6 +44,35 @@ for (const object of objects) {
   }
 }
 
+const pathTileKeys = new Set<string>()
+for (let x = WALK_MIN; x <= WALK_MAX_X; x += 1) pathTileKeys.add(`${x},6`)
+for (let y = WALK_MIN; y <= WALK_MAX_Y; y += 1) pathTileKeys.add(`5,${y}`)
+
+const groundTiles: (Position & { path: boolean })[] = []
+for (let y = 0; y < MAP_HEIGHT; y += 1) {
+  for (let x = 0; x < MAP_WIDTH; x += 1) {
+    groundTiles.push({ x, y, path: pathTileKeys.has(`${x},${y}`) })
+  }
+}
+
+// Isometric (2:1 diamond) projection: screen offset in half-tile units from the map's left corner.
+const isoUnits = (gx: number, gy: number) => ({ ux: gx - gy + MAP_HEIGHT, uy: gx + gy })
+
+const isoSpan = MAP_WIDTH + MAP_HEIGHT
+const isoPercent = (gx: number, gy: number) => {
+  const { ux, uy } = isoUnits(gx, gy)
+  return { x: (ux / isoSpan) * 100, y: (uy / isoSpan) * 100 }
+}
+
+// The fence traces the outer edge of the walkable tiles, so it marks exactly where movement stops.
+const fenceCorners = [
+  isoPercent(WALK_MIN, WALK_MIN),
+  isoPercent(WALK_MAX_X + 1, WALK_MIN),
+  isoPercent(WALK_MAX_X + 1, WALK_MAX_Y + 1),
+  isoPercent(WALK_MIN, WALK_MAX_Y + 1),
+]
+const toPoints = (points: { x: number; y: number }[]) => points.map(point => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(' ')
+
 const directionVectors: Record<Direction, Position> = {
   up: { x: 0, y: -1 },
   down: { x: 0, y: 1 },
@@ -47,7 +81,7 @@ const directionVectors: Record<Direction, Position> = {
 }
 
 function App() {
-  const [position, setPosition] = useState<Position>({ x: 8, y: 8 })
+  const [position, setPosition] = useState<Position>({ x: 5, y: 9 })
   const [direction, setDirection] = useState<Direction>('up')
   const [message, setMessage] = useState('')
   const [panel, setPanel] = useState<Panel>(null)
@@ -58,6 +92,7 @@ function App() {
   const [wish, setWish] = useState('')
   const [wishStatus, setWishStatus] = useState('')
   const [publicConsent, setPublicConsent] = useState(false)
+  const [ready, setReady] = useState(false)
   const saveTimer = useRef<number | undefined>(undefined)
   const lastKeyboardMove = useRef(0)
   const captureMode = new URLSearchParams(location.search).has('capture')
@@ -67,7 +102,7 @@ function App() {
     setDirection(nextDirection)
     setPosition(current => {
       const next = { x: current.x + vector.x, y: current.y + vector.y }
-      const outsideMap = next.x < 1 || next.x > MAP_WIDTH - 2 || next.y < 1 || next.y > MAP_HEIGHT - 2
+      const outsideMap = next.x < WALK_MIN || next.x > WALK_MAX_X || next.y < WALK_MIN || next.y > WALK_MAX_Y
 
       if (outsideMap || occupiedTiles.has(`${next.x},${next.y}`)) return current
       return next
@@ -124,19 +159,21 @@ function App() {
         fetch('/api/save').then(response => response.ok ? response.json() : null).then(result => {
           if (result?.save?.position) setPosition(result.save.position)
           if (result?.save?.direction) setDirection(result.save.direction)
-        })
+        }).finally(() => setReady(true))
+      } else {
+        setReady(true)
       }
-    }).catch(() => undefined)
+    }).catch(() => setReady(true))
   }, [])
 
   useEffect(() => {
-    if (!user) return
+    if (!user || !ready) return
     window.clearTimeout(saveTimer.current)
     saveTimer.current = window.setTimeout(() => {
       fetch('/api/save', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ position, direction, worldDay: 1 }) }).catch(() => undefined)
     }, 500)
     return () => window.clearTimeout(saveTimer.current)
-  }, [direction, position, user])
+  }, [direction, position, user, ready])
 
   const submitWish = async () => {
     setWishStatus('')
@@ -159,38 +196,62 @@ function App() {
           <button onClick={() => setPanel('account')} aria-label="アカウント">●</button>
         </nav>
         <div className="pixel-map" style={{ '--cols': MAP_WIDTH, '--rows': MAP_HEIGHT } as CSSProperties}>
-          <div className="path path-horizontal" />
-          <div className="path path-vertical" />
-          <div className="fence fence-top" />
-          <div className="fence fence-bottom" />
-          <div className="fence fence-left" />
-          <div className="fence fence-right" />
+          {groundTiles.map(tile => {
+            const { ux, uy } = isoUnits(tile.x + 0.5, tile.y + 0.5)
+            const shade = (tile.x + tile.y) % 2 === 0 ? 'tile-light' : 'tile-dark'
+            return (
+              <div
+                key={`tile-${tile.x}-${tile.y}`}
+                className={`iso-tile ${tile.path ? 'path-tile' : shade}`}
+                style={{ '--ux': ux, '--uy': uy } as CSSProperties}
+              />
+            )
+          })}
 
-          {objects.map(object => (
-            <div
-              key={object.key}
-              className={`map-object ${object.className}`}
-              style={{
-                '--x': object.x,
-                '--y': object.y,
-                '--object-width': object.width ?? 1,
-                '--object-height': object.height ?? 1,
-              } as CSSProperties}
-              role="img"
-              aria-label={object.label}
-            />
-          ))}
+          <svg className="garden-fence" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+            <polygon points={toPoints(fenceCorners)} />
+          </svg>
 
-          <div
-            className={`player facing-${direction}`}
-            style={{ '--x': position.x, '--y': position.y } as CSSProperties}
-            role="img"
-            aria-label="あなた"
-          ><span /></div>
+          {objects.map(object => {
+            const width = object.width ?? 1
+            const height = object.height ?? 1
+            const { ux, uy } = object.flat
+              ? isoUnits(object.x + width / 2, object.y + height / 2)
+              : isoUnits(object.x + width / 2, object.y + height)
+            return (
+              <div
+                key={object.key}
+                className={`map-object ${object.className} ${object.flat ? 'is-flat' : ''}`}
+                style={{
+                  '--ux': ux,
+                  '--uy': uy,
+                  '--object-width': width,
+                  '--object-height': height,
+                  zIndex: object.flat ? 3 : Math.round(uy * 100),
+                } as CSSProperties}
+                role="img"
+                aria-label={object.label}
+              ><i /><i /><i /></div>
+            )
+          })}
+
+          {ready && (() => {
+            const { ux, uy } = isoUnits(position.x + 0.5, position.y + 1)
+            return (
+              <div
+                className="player"
+                style={{ '--ux': ux, '--uy': uy, zIndex: Math.round(uy * 100) + 1 } as CSSProperties}
+                role="img"
+                aria-label="あなた"
+              ><div className={`player-sprite facing-${direction}`}><span /></div></div>
+            )
+          })()}
         </div>
 
-        <div className="message-window" role="status" aria-live="polite"><p>{message || '\u00a0'}</p></div>
-        <Controls move={move} act={act} />
+        <div className="hud">
+          <div className="message-window" role="status" aria-live="polite"><p>{message || '\u00a0'}</p></div>
+          <Controls move={move} act={act} />
+        </div>
       </section>
       {panel && <div className="overlay" role="presentation" onMouseDown={event => event.target === event.currentTarget && setPanel(null)}>
         <section className="record-window" role="dialog" aria-modal="true" aria-label={panel === 'diary' ? '創世日記' : panel === 'wish' ? '願い事' : 'アカウント'}>

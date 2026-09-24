@@ -138,7 +138,7 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
     const issueResponse = await fetch(`https://api.github.com/repos/${env.GITHUB_OWNER}/${env.GITHUB_REPO}/issues`, {
       method: 'POST',
       headers: { authorization: `Bearer ${env.GITHUB_TOKEN}`, accept: 'application/vnd.github+json', 'content-type': 'application/json', 'user-agent': 'hakoniwa-worker' },
-      body: JSON.stringify({ title: `願い：${body.replaceAll(/[\r\n]+/g, ' ').slice(0, 48)}`, body: `${body}\n\n---\nHAKONIWAの願いの木から届きました。`, labels: ['wish'] }),
+      body: JSON.stringify({ title: `願い：${body.replaceAll(/[\r\n]+/g, ' ').slice(0, 48)}`, body: `${body}\n\n---\nHAKONIWAの願いの掲示板から届きました。`, labels: ['wish'] }),
     })
     if (!issueResponse.ok) return json({ error: '願いを届けられませんでした。' }, 502)
     const issue = await issueResponse.json<{ number: number; html_url: string }>()

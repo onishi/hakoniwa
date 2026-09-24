@@ -82,9 +82,8 @@ button {
 .primary-button, .primary-link { display: inline-block; padding: 11px 18px; color: #f6edcf; border: 3px solid #29251f; background: #385342; font: inherit; text-decoration: none; cursor: pointer; }
 .primary-button:disabled { opacity: .45; cursor: default; }
 .capture-mode .world-actions,
-.capture-mode .message-window,
-.capture-mode .controls { display: none; }
-.capture-mode .pixel-map { top: 50%; width: min(94vw, 1200px); max-height: 92vh; transform: translateY(-50%); }
+.capture-mode .hud { display: none; }
+.capture-mode .pixel-map { top: 50%; transform: translateY(-50%); }
 
 .game-shell {
   background: #172019;
@@ -100,193 +99,260 @@ button {
 }
 
 .pixel-map {
-  --cell-x: calc(100% / var(--cols));
-  --cell-y: calc(100% / var(--rows));
+  --tw: clamp(46px, 7.4vw, 124px);
+  --th: calc(var(--tw) * 0.5);
   position: absolute;
-  top: 4vh;
-  width: min(92vw, calc((100vh - 220px) * 1.6));
-  max-height: calc(100vh - 220px);
-  aspect-ratio: 16 / 10;
-  overflow: hidden;
-  border: 6px solid #263a2b;
-  outline: 6px solid #a1814f;
-  background-color: #79a45a;
-  background-image:
-    linear-gradient(90deg, rgb(49 93 47 / 12%) 1px, transparent 1px),
-    linear-gradient(rgb(49 93 47 / 12%) 1px, transparent 1px),
-    radial-gradient(circle at 9px 9px, #91b868 0 2px, transparent 3px);
-  background-size: var(--cell-x) var(--cell-y), var(--cell-x) var(--cell-y), 23px 23px;
-  box-shadow: 12px 14px 0 rgb(10 18 12 / 32%);
+  top: 3vh;
+  width: calc((var(--cols) + var(--rows)) * var(--tw) / 2);
+  height: calc((var(--cols) + var(--rows)) * var(--th) / 2);
+  overflow: visible;
 }
 
-.path {
+.garden-fence {
   position: absolute;
-  background: #c3a365;
-  box-shadow: inset 0 0 0 4px rgb(121 82 45 / 13%);
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 3;
+  overflow: visible;
+  pointer-events: none;
 }
 
-.path-horizontal { left: 7%; right: 7%; top: 49%; height: 13%; }
-.path-vertical { top: 8%; bottom: 8%; left: 48%; width: 9%; }
-
-.fence { position: absolute; z-index: 2; background-color: #745032; }
-
-.fence-top,
-.fence-bottom {
-  left: 5%;
-  width: 90%;
-  height: 7px;
-  border-top: 3px solid #a47745;
-  background: repeating-linear-gradient(90deg, #69462c 0 7px, transparent 7px 28px);
+.garden-fence polygon {
+  fill: none;
+  stroke: #6b4a2c;
+  stroke-width: 3;
+  stroke-dasharray: 9 7;
+  vector-effect: non-scaling-stroke;
 }
 
-.fence-top { top: 8%; }
-.fence-bottom { bottom: 8%; }
-
-.fence-left,
-.fence-right {
-  top: 8%;
-  width: 7px;
-  height: 84%;
-  border-left: 3px solid #a47745;
-  background: repeating-linear-gradient(#69462c 0 7px, transparent 7px 28px);
+.iso-tile {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: var(--tw);
+  height: var(--th);
+  transform: translate(calc(var(--ux) * var(--tw) / 2 - 50%), calc(var(--uy) * var(--th) / 2 - 50%));
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+  z-index: 1;
 }
 
-.fence-left { left: 5%; }
-.fence-right { right: 5%; }
+.tile-light { background: #86b568; }
+.tile-dark { background: #79a45a; }
+.path-tile { background: #c8a96c; }
 
 .map-object,
 .player {
   position: absolute;
-  left: calc(var(--x) * var(--cell-x));
-  top: calc(var(--y) * var(--cell-y));
-  width: calc(var(--object-width, 1) * var(--cell-x));
-  height: calc(var(--object-height, 1) * var(--cell-y));
+  left: 0;
+  top: 0;
+  width: calc(var(--object-width, 1) * var(--tw));
+  height: calc(var(--object-height, 1) * var(--tw));
+  transform: translate(calc(var(--ux) * var(--tw) / 2 - 50%), calc(var(--uy) * var(--th) / 2 - 100%));
   z-index: 4;
+}
+
+/* Flat ground features follow the isometric footprint of their tiles instead of a standing sprite box. */
+.map-object.is-flat {
+  width: calc((var(--object-width) + var(--object-height)) * var(--tw) / 2);
+  height: calc((var(--object-width) + var(--object-height)) * var(--th) / 2);
+  transform: translate(calc(var(--ux) * var(--tw) / 2 - 50%), calc(var(--uy) * var(--th) / 2 - 50%));
+}
+
+/* Standing sprites share one geometry: the tile footprint is the diamond
+   left(0 75%) front(50% 100%) right(100% 75%) back(50% 50%) inside the sprite box,
+   so every slanted edge below uses the same 2:1 slope as the ground tiles. */
+.map-object i {
+  position: absolute;
+  display: block;
+  inset: 0;
+}
+
+.map-tree,
+.map-wish-board,
+.map-well,
+.map-house {
+  background: radial-gradient(ellipse 30% 11% at 50% 76%, rgb(22 42 26 / 30%) 0 99%, transparent 100%);
 }
 
 .map-tree::before,
 .map-tree::after { content: ''; position: absolute; }
 
 .map-tree::before {
-  left: 39%;
-  bottom: 3%;
-  width: 22%;
-  height: 42%;
-  background: #654326;
-  box-shadow: inset -4px 0 #49311e;
+  left: 44%;
+  top: 52%;
+  width: 12%;
+  height: 25%;
+  background: linear-gradient(90deg, #7a5433 0 55%, #593b23 56%);
 }
 
 .map-tree::after {
-  left: 8%;
-  top: -27%;
-  width: 84%;
-  height: 78%;
-  border: 4px solid #244d2c;
-  background: #3e773e;
-  box-shadow: -9px 8px 0 #4d8d48, 10px 7px 0 #315f35, 0 -8px 0 #57944c;
+  left: 14%;
+  top: 6%;
+  width: 72%;
+  height: 56%;
+  border-radius: 50%;
+  background: radial-gradient(circle at 64% 28%, #5da75a 0 40%, #46853f 41% 71%, #356733 72%);
 }
 
-.map-wish-tree::before,
-.map-wish-tree::after { content: ''; position: absolute; }
-
-.map-wish-tree::before {
-  left: 40%;
-  bottom: 2%;
-  width: 20%;
-  height: 48%;
-  background: #715034;
-  box-shadow: inset -4px 0 #4f3726;
+/* Notice board: posts stand on the tile centre line and the panel runs along the
+   tile's right-going axis, so every edge keeps the same 2:1 slope as the ground. */
+.map-wish-board i:nth-child(1) {
+  clip-path: polygon(17% 57.5%, 25% 53.5%, 25% 87.5%, 17% 91.5%);
+  background: linear-gradient(90deg, #6b4a2c 0 55%, #4f3622 56%);
 }
 
-.map-wish-tree::after {
-  left: 5%;
-  top: -18%;
-  width: 90%;
-  height: 72%;
-  border: 4px solid #3d4930;
-  background:
-    linear-gradient(90deg, transparent 0 17%, #f2dfb0 18% 29%, transparent 30% 47%, #d8a57d 48% 59%, transparent 60%),
-    #6c8047;
-  box-shadow: -8px 7px 0 #829552, 8px 8px 0 #566c3e;
+.map-wish-board i:nth-child(2) {
+  clip-path: polygon(75% 28.5%, 83% 24.5%, 83% 58.5%, 75% 62.5%);
+  background: linear-gradient(90deg, #6b4a2c 0 55%, #4f3622 56%);
 }
 
-.map-house {
-  border-bottom: 18px solid #d0ae6a;
-  background: linear-gradient(135deg, transparent 0 15%, #874736 16% 51%, #66362d 52%);
-  box-shadow: 0 7px 0 #533821;
+.map-wish-board i:nth-child(3) {
+  clip-path: polygon(14% 61%, 86% 25%, 86% 49%, 14% 85%);
+  background: linear-gradient(180deg, #cba068 0 52%, #a9814f 53%);
+}
+
+.map-wish-board::before,
+.map-wish-board::after { content: ''; position: absolute; inset: 0; }
+
+.map-wish-board::before {
+  clip-path: polygon(24% 62%, 42% 53%, 42% 65%, 24% 74%);
+  background: #f6e9c8;
+}
+
+.map-wish-board::after {
+  clip-path: polygon(52% 48%, 70% 39%, 70% 51%, 52% 60%);
+  background: #eed4ac;
+}
+
+.map-house i:nth-child(1) {
+  clip-path: polygon(0% 75%, 50% 100%, 50% 82%, 0% 57%);
+  background: #6f4234;
+}
+
+.map-house i:nth-child(2) {
+  clip-path: polygon(50% 100%, 100% 75%, 100% 57%, 50% 82%);
+  background: #8a5241;
+}
+
+.map-house i:nth-child(3) {
+  clip-path: polygon(60% 95%, 76% 87%, 76% 69%, 60% 77%);
+  background: #3f2b20;
+}
+
+.map-house::before,
+.map-house::after { content: ''; position: absolute; inset: 0; }
+
+.map-house::before {
+  clip-path: polygon(0% 57%, 50% 82%, 50% 22%);
+  background: #9c4632;
 }
 
 .map-house::after {
-  content: '';
-  position: absolute;
-  bottom: -18px;
-  left: 40%;
-  width: 23%;
-  height: 40%;
-  border: 3px solid #30251c;
-  background: #4f3527;
+  clip-path: polygon(50% 82%, 100% 57%, 50% 22%);
+  background: #b5573e;
 }
 
-.map-well {
-  width: var(--cell-x);
-  height: var(--cell-y);
-  border: 7px solid #a2a69a;
-  border-radius: 50%;
-  background: #29352e;
-  box-shadow: 0 5px 0 #566157;
+.map-well i:nth-child(1) {
+  clip-path: polygon(14% 55%, 50% 73%, 86% 55%, 86% 75%, 50% 93%, 14% 75%);
+  background: linear-gradient(90deg, #7f8279 0 48%, #9ba095 49%);
 }
 
-.map-pond {
-  border: 7px solid #4e7b4a;
-  border-radius: 47%;
-  background: repeating-linear-gradient(0deg, #4d909b 0 7px, #65a9ad 7px 12px);
-  box-shadow: 0 0 0 4px #91b667;
+.map-well::before,
+.map-well::after { content: ''; position: absolute; border-radius: 50%; }
+
+.map-well::before {
+  left: 14%;
+  top: 37%;
+  width: 72%;
+  height: 36%;
+  background: #aeb3a7;
+}
+
+.map-well::after {
+  left: 24%;
+  top: 43%;
+  width: 52%;
+  height: 24%;
+  background: radial-gradient(ellipse at 50% 40%, #33443a 0 60%, #1d2a24 61%);
+}
+
+/* The pond keeps the tile grid's diamond outline; its ripples run along the 2:1 isometric axis. */
+.map-pond::before,
+.map-pond::after { content: ''; position: absolute; inset: 0; }
+
+.map-pond::before {
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+  background: #6d9a52;
+}
+
+.map-pond::after {
+  clip-path: polygon(50% 13%, 87% 50%, 50% 87%, 13% 50%);
+  background:
+    repeating-linear-gradient(26.565deg, rgb(255 255 255 / 12%) 0 3px, transparent 3px 10px),
+    linear-gradient(200deg, #6fb2bb 0 34%, #4a8e9c 35% 72%, #356e7e 73%);
 }
 
 .player {
   --object-width: 1;
   --object-height: 1;
   z-index: 8;
-  transition: left 90ms linear, top 90ms linear;
-  filter: drop-shadow(3px 4px 0 rgb(25 40 27 / 30%));
+  transition: transform 90ms linear;
+  background: radial-gradient(ellipse 24% 9% at 50% 76%, rgb(22 42 26 / 32%) 0 99%, transparent 100%);
 }
 
-.player::before {
+.player-sprite {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transform: scaleX(var(--facing, 1));
+}
+
+/* Feet land on the tile centre (50% 75%), matching the standing objects. */
+.player-sprite::before {
   content: '';
   position: absolute;
-  top: 9%;
-  left: 34%;
-  width: 32%;
-  height: 31%;
+  top: 14%;
+  left: 35%;
+  width: 30%;
+  height: 24%;
   border: 3px solid #392d29;
   background: #dcb17e;
 }
 
-.player span {
+.player-sprite span {
   position: absolute;
-  top: 40%;
-  left: 27%;
-  width: 46%;
-  height: 47%;
+  top: 37%;
+  left: 29%;
+  width: 42%;
+  height: 39%;
   border: 3px solid #29384a;
-  background: #4b668d;
+  background: linear-gradient(90deg, #41587b 0 46%, #5574a0 47%);
   clip-path: polygon(15% 0, 85% 0, 100% 100%, 0 100%);
 }
 
-.player.facing-left { transform: scaleX(-1); }
-.player.facing-right { transform: scaleX(1); }
+.player-sprite.facing-left { --facing: -1; }
+.player-sprite.facing-right { --facing: 1; }
 
-.message-window {
+.hud {
   position: absolute;
   left: max(4vw, 18px);
   right: max(4vw, 18px);
   bottom: max(4vh, 18px);
+  z-index: 12;
+  display: flex;
+  align-items: flex-end;
+  gap: 24px;
+}
+
+.message-window {
+  flex: 1 1 auto;
+  min-width: 0;
   min-height: 118px;
-  padding: 24px 220px 24px 26px;
+  padding: 24px 26px;
   border: 5px solid #29251f;
   background: #f6edcf;
   box-shadow: inset 0 0 0 4px #c8aa63, 8px 9px 0 rgb(8 15 10 / 35%);
-  z-index: 12;
 }
 
 .message-window p {
@@ -296,9 +362,7 @@ button {
 }
 
 .controls {
-  position: absolute;
-  right: max(5vw, 22px);
-  bottom: max(5vh, 28px);
+  flex: none;
   z-index: 15;
   display: flex;
   align-items: center;
@@ -347,38 +411,43 @@ button:focus-visible { outline: 4px solid #fff2a8; outline-offset: 3px; }
 
 @media (max-width: 720px) {
   .pixel-map {
-    top: max(18px, calc((100vh - 164px - 58.75vw) / 2));
-    width: 94vw;
-    max-height: none;
+    --tw: clamp(24px, min(7vw, calc((100vh - 280px) / 6.5)), 46px);
+    top: 2vh;
     border-width: 4px;
     outline-width: 4px;
     box-shadow: 7px 8px 0 rgb(10 18 12 / 32%);
   }
 
-  .message-window {
+  .hud {
     left: 12px;
     right: 12px;
     bottom: 12px;
-    min-height: 164px;
-    padding: 18px 18px 92px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 14px;
+  }
+
+  .message-window {
+    min-height: 88px;
+    padding: 16px 18px;
     border-width: 4px;
   }
 
   .message-window p { font-size: 15px; }
-  .controls { right: 28px; bottom: 24px; gap: 18px; }
+  .controls { justify-content: center; gap: 18px; }
   .dpad { grid-template: repeat(3, 36px) / repeat(3, 36px); }
   .action-button { width: 58px; height: 58px; }
 }
 
 @media (max-height: 620px) and (orientation: landscape) {
   .pixel-map {
-    top: 3vh;
-    width: min(88vw, calc((100vh - 150px) * 1.6));
-    max-height: calc(100vh - 150px);
+    --tw: clamp(22px, min(6vw, calc((100vh - 150px) / 6.5)), 64px);
+    top: 2vh;
   }
 
-  .message-window { min-height: 94px; padding: 18px 195px 18px 20px; }
-  .controls { right: 4vw; bottom: 17px; gap: 15px; }
+  .hud { left: 4vw; right: 4vw; bottom: 17px; gap: 16px; }
+  .message-window { min-height: 94px; padding: 14px 20px; }
+  .controls { gap: 15px; }
   .dpad { grid-template: repeat(3, 30px) / repeat(3, 30px); }
   .action-button { width: 52px; height: 52px; }
 }
