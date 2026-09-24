@@ -6,13 +6,12 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "deploy": "npm run build && npx --yes wrangler@4.86.0 pages deploy dist --branch main",
+    "deploy": "npm run build && wrangler deploy",
     "lint": "eslint .",
     "preview": "vite preview"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
-    "lucide-react": "latest",
     "react": "latest",
     "react-dom": "latest",
     "vite": "latest"
@@ -26,6 +25,7 @@
     "eslint-plugin-react-refresh": "latest",
     "globals": "latest",
     "typescript": "latest",
-    "typescript-eslint": "latest"
+    "typescript-eslint": "latest",
+    "wrangler": "4.135.0"
   }
 }

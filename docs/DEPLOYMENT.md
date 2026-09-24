@@ -1,35 +1,37 @@
-# Cloudflare Pagesへのデプロイ
+# Cloudflare Workersへのデプロイ
 
-このプロジェクトの静的フロントエンドを Cloudflare Pages の `hakoniwa` プロジェクトへ直接アップロードする手順をまとめる。
+このプロジェクトは、Viteのビルド成果物を Cloudflare Workers の静的アセットとして配信する。Cloudflare Pagesは使用しない。
 
 ## 現在の設定
 
+- Worker名: `hakoniwa`
 - ビルドコマンド: `npm run build`
-- 出力先: `dist/`
-- Pagesプロジェクト: `hakoniwa`
-- 本番ブランチ: `main`
+- 静的アセット: `dist/`
 - デプロイコマンド: `npm run deploy`
-- SPAフォールバック: `public/_redirects`
+- 公開先: `workers.dev`
+- SPAフォールバック: `assets.not_found_handling = "single-page-application"`
 - HTTPヘッダー: `public/_headers`
 
-設定元は [`package.json`](../package.json)、[`wrangler.jsonc`](../wrangler.jsonc)、[`public/`](../public/) にある。`dist/` は生成物なのでGitへコミットしない。
+設定元は [`package.json`](../package.json)、[`wrangler.jsonc`](../wrangler.jsonc)、[`public/_headers`](../public/_headers) にある。`dist/` は生成物なのでGitへコミットしない。
 
 ## 初回準備
 
-Node.jsとnpmを用意し、リポジトリのルートで依存関係をインストールする。
+Node.jsとnpmを用意し、ロックファイルに従って依存関係をインストールする。
 
 ```bash
 npm install
 ```
 
-開発者の端末から公開する場合は、ブラウザを使ってCloudflareへログインする。
+Wranglerはプロジェクトの開発依存としてバージョンを固定している。グローバルインストールは不要である。
+
+開発者の端末から公開する場合はCloudflareへログインし、意図したアカウントであることを確認する。
 
 ```bash
-npx --yes wrangler@4.86.0 login
-npx --yes wrangler@4.86.0 whoami
+npx wrangler login
+npx wrangler whoami
 ```
 
-`whoami` で意図したCloudflareアカウントが表示され、Pagesへの書き込み権限があることを確認する。認証情報やAPIトークンはリポジトリへ保存しない。
+認証情報やAPIトークンはリポジトリへ保存しない。
 
 ## 本番デプロイ
 
@@ -48,50 +50,67 @@ npm run lint
 npm run build
 ```
 
-両方が成功するまでデプロイしない。
+### 3. Workers用パッケージを検証する
 
-### 3. Pagesへ公開する
+```bash
+npx wrangler deploy --dry-run
+```
+
+静的アセット、設定、アップロード対象を確認する。Dry runはCloudflare上のリソースや実際の応答までは検証しない。
+
+### 4. Workersへ公開する
 
 ```bash
 npm run deploy
 ```
 
-このスクリプトは再度ビルドした後、次の処理を実行する。
+このスクリプトはビルド後に `wrangler deploy` を実行する。成功すると `hakoniwa.<subdomain>.workers.dev` のような公開URLが返される。
+
+### 5. 公開結果を確認する
 
 ```bash
-npx --yes wrangler@4.86.0 pages deploy dist --branch main
-```
-
-成功すると、Cloudflareからデプロイ固有の `*.pages.dev` URLが返される。`main` を指定しているため、Pagesプロジェクトの本番デプロイとして扱われる。
-
-### 4. 公開結果を確認する
-
-```bash
-curl -I https://<deployment-id>.hakoniwa-5hg.pages.dev
+curl -I https://<worker-url>.workers.dev
 ```
 
 最低限、次を確認する。
 
 - HTTPステータスが `200`
 - HTML、JavaScript、CSSが読み込める
-- 直接URLを開いた場合もSPAが表示される
+- 直接URLを開いた場合もSPAへフォールバックする
 - `public/_headers` のセキュリティヘッダーが付与されている
-- 主要な画面とキーボード／タッチ操作が動作する
+- 主要なキーボード／タッチ操作が動作する
+
+## ローカル確認
+
+画面実装の開発にはViteを使う。
+
+```bash
+npm run dev
+```
+
+Workersの静的アセット配信設定まで含めて確認する場合は、先にビルドしてWranglerを起動する。
+
+```bash
+npm run build
+npx wrangler dev
+```
 
 ## CIからデプロイする場合
 
-対話ログインの代わりに、Cloudflareで発行した権限を絞ったAPIトークンをCIのシークレットへ登録する。
+対話ログインの代わりに、対象Workerへ必要最小限の権限を持つAPIトークンをCIのシークレットへ登録する。
 
 - `CLOUDFLARE_API_TOKEN`
 - `CLOUDFLARE_ACCOUNT_ID`
 
-トークン値を `.env`、シェルスクリプト、ログ、Git管理ファイルへ書かない。Pagesへのデプロイに必要な対象アカウントとプロジェクトだけへ権限を限定する。
+トークン値を `.env`、シェルスクリプト、ログ、Git管理ファイルへ書かない。
+
+## ロールバック
+
+Cloudflare DashboardまたはWranglerで、直前の正常なWorkerバージョンを確認してロールバックする。コードのロールバックと、D1やR2など接続先データのロールバックは別であるため、将来バインディングを追加した場合はデータの整合性を個別に確認する。
 
 ## トラブル対応
 
-### `tsc` または `eslint` が見つからない
-
-依存関係が未導入である。
+### `wrangler`、`tsc`、`eslint`が見つからない
 
 ```bash
 npm install
@@ -100,21 +119,22 @@ npm install
 ### 認証エラーになる
 
 ```bash
-npx --yes wrangler@4.86.0 whoami
+npx wrangler whoami
 ```
 
-ログイン先と権限を確認し、必要なら `wrangler login` をやり直す。複数アカウントを使っている場合は、意図しないアカウントへ公開しないよう特に注意する。
+ログイン先と権限を確認し、必要なら `npx wrangler login` をやり直す。
+
+### 画面内のURLで404になる
+
+[`wrangler.jsonc`](../wrangler.jsonc) の `assets.not_found_handling` が `single-page-application` であることを確認する。Pages用の `_redirects` は使用しない。
 
 ### デプロイ後に画面が更新されない
 
-デプロイ固有URLで新しい成果物を確認する。`/assets/*` には長期キャッシュが設定されているが、Viteがファイル名へ内容ハッシュを付けるため、正常なビルドでは新しいURLに切り替わる。
-
-### 公開版に問題がある
-
-追加のデプロイを急ぐ前に、Cloudflare Dashboardの Pages プロジェクトで直前の正常なデプロイを確認する。再公開またはロールバック時は、対象のコミットとデプロイIDを記録し、公開後に同じ確認項目を再実施する。
+ビルド時に出力されたアセット名とWorkerのデプロイバージョンを確認する。Viteはファイル名へ内容ハッシュを付けるため、正常なビルドでは新しいURLへ切り替わる。
 
 ## 参考資料
 
-- [Cloudflare Pages: Direct Upload](https://developers.cloudflare.com/pages/get-started/direct-upload/)
+- [Cloudflare: PagesからWorkersへの移行](https://developers.cloudflare.com/workers/static-assets/migration-guides/migrate-from-pages/)
+- [Cloudflare Workers Static Assets](https://developers.cloudflare.com/workers/static-assets/)
 - [Wrangler commands](https://developers.cloudflare.com/workers/wrangler/commands/)
 - [Cloudflare API tokens](https://developers.cloudflare.com/fundamentals/api/get-started/create-token/)

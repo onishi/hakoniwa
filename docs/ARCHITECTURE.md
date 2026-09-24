@@ -6,15 +6,15 @@
 
 ## 想定する本番構成
 
-静的フロントエンドは Cloudflare Pages、共有世界のAPIは Cloudflare Workers、データは D1 と R2 を使用する。毎日の創造処理は、さくらインターネットのVPS上のcronから実行する。
+静的フロントエンドと共有世界のAPIは Cloudflare Workers、データは D1 と R2 を使用する。毎日の創造処理は、さくらインターネットのVPS上のcronから実行する。
 
 ```text
-観測者 ──> Cloudflare Pages ──> Workers API ──> D1 / R2
-                                      ^
-                                      │ 署名付き POST /admin/creation-cycle
-                               さくらVPS cron
-                                      │
-                              AI生成 + 整合性検証
+観測者 ──> Cloudflare Workers（静的アセット + API）──> D1 / R2
+                          ^
+                          │ 署名付き POST /admin/creation-cycle
+                   さくらVPS cron
+                          │
+                  AI生成 + 整合性検証
 ```
 
 ## 一日の創造サイクル
