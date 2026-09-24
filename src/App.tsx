@@ -105,6 +105,15 @@ function App() {
   }, [act, move])
 
   useEffect(() => {
+    if (!panel) return
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPanel(null)
+    }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [panel])
+
+  useEffect(() => {
     Promise.all([
       fetch('/api/session').then(response => response.ok ? response.json() : { user: null }),
       fetch('/api/diary').then(response => response.ok ? response.json() : { entries: [] }),
