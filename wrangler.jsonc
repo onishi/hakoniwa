@@ -22,7 +22,7 @@
   "browser": { "binding": "BROWSER" },
   "triggers": { "crons": ["5 15 * * *"] },
   "vars": {
-    "PUBLIC_ORIGIN": "https://hakoniwa.onishin.com",
+    "PUBLIC_ORIGIN": "https://hakoniwa.wagaya.workers.dev",
     "GITHUB_OWNER": "onishi",
     "GITHUB_REPO": "hakoniwa"
   },
