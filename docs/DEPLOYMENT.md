@@ -14,6 +14,7 @@
 - デプロイコマンド: `npm run deploy`
 - 公開先: `workers.dev`
 - SPAフォールバック: `assets.not_found_handling = "single-page-application"`
+- API優先ルーティング: `assets.run_worker_first = ["/api/*"]`
 - HTTPヘッダー: `public/_headers`
 
 設定元は [`package.json`](../package.json)、[`wrangler.jsonc`](../wrangler.jsonc)、[`public/_headers`](../public/_headers) にある。`dist/` は生成物なのでGitへコミットしない。
@@ -163,6 +164,10 @@ npx wrangler whoami
 ```
 
 ログイン先と権限を確認し、必要なら `npx wrangler login` をやり直す。
+
+### APIを開くとゲーム画面が表示される
+
+[`wrangler.jsonc`](../wrangler.jsonc) の `assets.run_worker_first` に `/api/*` が含まれていることを確認する。SPAフォールバックより先にWorkerを実行しないと、APIパスにも `index.html` が返る。
 
 ### 画面内のURLで404になる
 
