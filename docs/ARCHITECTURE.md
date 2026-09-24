@@ -2,14 +2,17 @@
 
 ## 現在の実装
 
-現在は React、TypeScript、Viteで構築した静的フロントエンドのプロトタイプである。願いはブラウザの `localStorage` に保存され、他の端末とは共有されない。
+React、TypeScript、ViteのフロントエンドとCloudflare WorkerのAPIで構成する。Google OAuthの利用者、セーブ、願い、創世日記はD1、日次スクリーンショットはR2へ保存し、Browser RenderingをCron Triggerから実行する。
 
 ## 想定する本番構成
 
 静的フロントエンドと共有世界のAPIは Cloudflare Workers、データは D1 と R2 を使用する。毎日の創造処理は、さくらインターネットのVPS上のcronから実行する。
 
 ```text
-観測者 ──> Cloudflare Workers（静的アセット + API）──> D1 / R2
+観測者 ──> Cloudflare Workers（静的アセット + API）──> D1 / R2 / GitHub Issues
+            │               │
+            │               └── Google OAuth
+            └── Cron Trigger ──> Browser Rendering（日次撮影）
                           ^
                           │ 署名付き POST /admin/creation-cycle
                    さくらVPS cron
@@ -29,6 +32,8 @@
 ## 最小データモデル
 
 - `world_days`: 世界日、神託、公開時刻、生成モデル、検証結果
+- `users` / `sessions` / `saves`: Google利用者、ハッシュ化したセッション、個人セーブ
+- `genesis_diary`: 世界日、執筆した神、短い本文、R2画像キー
 - `world_entities`: 生物・場所・概念・法則。誕生日と消滅日を持つ
 - `relationships`: 捕食、成長、開花、発明など因果関係のグラフ
 - `wishes`: 暗号化した作者ID、本文、状態

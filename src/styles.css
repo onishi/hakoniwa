@@ -30,6 +30,62 @@ button {
   height: 100%;
 }
 
+.world-actions {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  z-index: 20;
+  display: flex;
+  gap: 10px;
+}
+
+.world-actions button,
+.close-button {
+  width: 46px;
+  height: 46px;
+  cursor: pointer;
+  color: #f6edcf;
+  border: 3px solid #29251f;
+  background: #385342;
+  box-shadow: 4px 4px 0 rgb(8 15 10 / 35%);
+}
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgb(13 20 14 / 72%);
+}
+
+.record-window {
+  position: relative;
+  width: min(620px, 100%);
+  max-height: min(720px, 92vh);
+  overflow: auto;
+  padding: 28px;
+  border: 5px solid #29251f;
+  background: #f6edcf;
+  box-shadow: inset 0 0 0 4px #c8aa63, 9px 10px 0 rgb(8 15 10 / 35%);
+}
+
+.record-window h1 { margin: 0 54px 22px 0; font-size: 24px; }
+.close-button { position: absolute; top: 15px; right: 15px; font-size: 24px; }
+.diary-entry { padding: 16px 0; border-top: 3px solid #c8aa63; }
+.diary-entry img { display: block; width: 100%; margin: 10px 0; image-rendering: pixelated; }
+.entry-meta, .small-text { font-size: 13px; color: #665d4c; }
+.record-window textarea { width: 100%; min-height: 130px; resize: vertical; padding: 14px; font: inherit; border: 3px solid #665d4c; background: #fffaf0; }
+.consent { display: flex; gap: 9px; margin: 16px 0; font-size: 14px; line-height: 1.6; }
+.consent input { width: 20px; height: 20px; flex: none; }
+.primary-button, .primary-link { display: inline-block; padding: 11px 18px; color: #f6edcf; border: 3px solid #29251f; background: #385342; font: inherit; text-decoration: none; cursor: pointer; }
+.primary-button:disabled { opacity: .45; cursor: default; }
+.capture-mode .world-actions,
+.capture-mode .message-window,
+.capture-mode .controls { display: none; }
+.capture-mode .pixel-map { top: 50%; width: min(94vw, 1200px); max-height: 92vh; transform: translateY(-50%); }
+
 .game-shell {
   background: #172019;
   image-rendering: pixelated;
