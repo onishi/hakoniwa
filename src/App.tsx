@@ -31,7 +31,7 @@ const objects: WorldObject[] = [
   { key: 'house', x: 7, y: 2, width: 2, height: 2, className: 'map-house', message: '小さな家です。中には、まだ誰もいません。', label: '小さな家' },
   { key: 'well', x: 5, y: 6, className: 'map-well', message: '古い井戸です。水の音はしません。', label: '古い井戸' },
   { key: 'wish-board', x: 2, y: 8, className: 'map-wish-board', message: '願いを、ひとつだけ。', label: '願いの掲示板', panel: 'wish' },
-  { key: 'pond', x: 7, y: 7, width: 3, height: 2, className: 'map-pond', message: '底はまだ見えません。生き物の気配はありません。', label: '静かな池', flat: true },
+  { key: 'pond', x: 7, y: 7, width: 2, height: 2, className: 'map-pond', message: '底はまだ見えません。生き物の気配はありません。', label: '静かな池', flat: true },
 ]
 
 const occupiedTiles = new Map<string, WorldObject>()
@@ -215,9 +215,10 @@ function App() {
           {objects.map(object => {
             const width = object.width ?? 1
             const height = object.height ?? 1
+            // Standing sprites hang from the front corner of their footprint; flat ones sit on its centre.
             const { ux, uy } = object.flat
               ? isoUnits(object.x + width / 2, object.y + height / 2)
-              : isoUnits(object.x + width / 2, object.y + height)
+              : isoUnits(object.x + width, object.y + height)
             return (
               <div
                 key={object.key}
@@ -236,7 +237,7 @@ function App() {
           })}
 
           {ready && (() => {
-            const { ux, uy } = isoUnits(position.x + 0.5, position.y + 1)
+            const { ux, uy } = isoUnits(position.x + 1, position.y + 1)
             return (
               <div
                 className="player"
