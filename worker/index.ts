@@ -156,7 +156,7 @@ async function captureToday(env: Env) {
   const browser = await launch(env.BROWSER)
   try {
     const page = await browser.newPage()
-    await page.setViewport({ width: 1280, height: 800, deviceScaleFactor: 1 })
+    await page.setViewportSize({ width: 1280, height: 800 })
     await page.goto(`${env.PUBLIC_ORIGIN}/?capture=1`, { waitUntil: 'networkidle' })
     const screenshot = await page.screenshot({ type: 'png' })
     const key = `world-days/day-${String(current.world_day).padStart(4, '0')}.png`
@@ -174,6 +174,7 @@ export default {
     return env.ASSETS.fetch(request)
   },
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext) {
-    ctx.waitUntil(captureToday(env))
+    // A failed capture must not stop the world; it is logged so the day can be retried.
+    ctx.waitUntil(captureToday(env).catch(error => console.error('capture failed', error)))
   },
 } satisfies ExportedHandler<Env>
