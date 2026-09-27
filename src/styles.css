@@ -106,6 +106,8 @@ button {
   width: calc((var(--cols) + var(--rows)) * var(--tw) / 2);
   height: calc((var(--cols) + var(--rows)) * var(--th) / 2);
   overflow: visible;
+  /* Depth sorting inside the map runs to four digits; keep it from outranking the overlay. */
+  isolation: isolate;
 }
 
 .garden-fence {
