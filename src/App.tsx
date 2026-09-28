@@ -150,6 +150,7 @@ function App() {
   const [offline, setOffline] = useState(false)
   const saveTimer = useRef<number | undefined>(undefined)
   const lastKeyboardMove = useRef(0)
+  const playerRef = useRef<HTMLDivElement | null>(null)
   const captureMode = new URLSearchParams(location.search).has('capture')
 
   const move = useCallback((nextDirection: Direction) => {
@@ -195,6 +196,11 @@ function App() {
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [act, move])
+
+  // The garden can be wider than the screen, so walking must not leave the view behind.
+  useEffect(() => {
+    playerRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  }, [position, ready, world])
 
   useEffect(() => {
     if (!panel) return
@@ -323,6 +329,7 @@ function App() {
             const { ux, uy } = world.isoUnits(position.x + 1, position.y + 1)
             return (
               <div
+                ref={playerRef}
                 className="player"
                 style={{ '--ux': ux, '--uy': uy, zIndex: Math.round(uy * 100) + 1 } as CSSProperties}
                 role="img"
@@ -332,11 +339,12 @@ function App() {
           })()}
         </div>}
 
-        <div className="hud">
-          <div className="message-window" role="status" aria-live="polite"><p>{message || '\u00a0'}</p></div>
-          <Controls move={move} act={act} />
-        </div>
       </section>
+      {/* Outside the world, so scrolling the garden never moves the hand away. */}
+      <div className="hud">
+        <div className="message-window" role="status" aria-live="polite"><p>{message || '\u00a0'}</p></div>
+        <Controls move={move} act={act} />
+      </div>
       {panel && <div className="overlay" role="presentation" onMouseDown={event => event.target === event.currentTarget && setPanel(null)}>
         <section className="record-window" role="dialog" aria-modal="true" aria-label={panel === 'diary' ? '創世日記' : panel === 'wish' ? '願い事' : 'アカウント'}>
           <button className="close-button" onClick={() => setPanel(null)} aria-label="閉じる">×</button>

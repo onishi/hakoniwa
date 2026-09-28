@@ -16,6 +16,7 @@ body,
   min-width: 320px;
   height: 100%;
   margin: 0;
+  /* The page itself never scrolls; the world does, so the controls stay put. */
   overflow: hidden;
 }
 
@@ -24,14 +25,16 @@ button {
   -webkit-tap-highlight-color: transparent;
 }
 
-.game-shell,
-.world {
+.game-shell {
   width: 100%;
   height: 100%;
+  display: flex;
+  flex-direction: column;
 }
 
 .world-actions {
-  position: absolute;
+  /* Pinned to the viewport so scrolling the world never takes the records away. */
+  position: fixed;
   top: 18px;
   right: 18px;
   z-index: 20;
@@ -84,28 +87,37 @@ button {
 .primary-button:disabled { opacity: .45; cursor: default; }
 .capture-mode .world-actions,
 .capture-mode .hud { display: none; }
-.capture-mode .pixel-map { top: 50%; transform: translateY(-50%); }
+/* Nothing to scroll past during a capture: the whole garden is the picture. */
+.capture-mode .world { overflow: visible; }
+.capture-mode .pixel-map { margin: 0; }
 
 .game-shell {
   background: #172019;
   image-rendering: pixelated;
 }
 
+/* The world takes the room left above the HUD and scrolls when the garden
+   is larger than that room. The garden is never shrunk to fit. */
 .world {
   position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
   display: grid;
   place-items: center;
-  overflow: hidden;
+  overflow: auto;
+  overscroll-behavior: contain;
   background: #283d2d;
 }
 
 .pixel-map {
-  --tw: clamp(46px, 7.4vw, 124px);
+  /* The floor keeps a tile readable; above it the garden grows with the screen. */
+  --tw: clamp(56px, 7.4vw, 124px);
   --th: calc(var(--tw) * 0.5);
-  position: absolute;
-  top: 3vh;
+  position: relative;
+  margin: 3vh 4vw;
   width: calc((var(--cols) + var(--rows)) * var(--tw) / 2);
   height: calc((var(--cols) + var(--rows)) * var(--th) / 2);
+  flex: none;
   overflow: visible;
   /* Depth sorting inside the map runs to four digits; keep it from outranking the overlay. */
   isolation: isolate;
@@ -296,11 +308,15 @@ button {
     linear-gradient(200deg, #6fb2bb 0 34%, #4a8e9c 35% 72%, #356e7e 73%);
 }
 
+/* The step is not animated. A transition on anything the position is built from —
+   the transform itself, or the custom properties it reads — pins the painted
+   position to its first value, and the player stops moving on screen while the
+   game still thinks it walked. Correct placement beats a 90ms glide. */
 .player {
   --object-width: 1;
   --object-height: 1;
   z-index: 8;
-  transition: transform 90ms linear;
+  scroll-margin: 24px;
   background: radial-gradient(ellipse 24% 9% at 50% 76%, rgb(22 42 26 / 32%) 0 99%, transparent 100%);
 }
 
@@ -337,11 +353,12 @@ button {
 .player-sprite.facing-left { --facing: -1; }
 .player-sprite.facing-right { --facing: 1; }
 
+/* Sits below the world in normal flow, so it never covers the garden
+   and never scrolls away from the hand. */
 .hud {
-  position: absolute;
-  left: max(4vw, 18px);
-  right: max(4vw, 18px);
-  bottom: max(4vh, 18px);
+  position: relative;
+  flex: none;
+  margin: 0 max(4vw, 18px) max(4vh, 18px);
   z-index: 12;
   display: flex;
   align-items: flex-end;
@@ -414,17 +431,13 @@ button:focus-visible { outline: 4px solid #fff2a8; outline-offset: 3px; }
 
 @media (max-width: 720px) {
   .pixel-map {
-    --tw: clamp(24px, min(7vw, calc((100vh - 280px) / 6.5)), 46px);
-    top: 2vh;
-    border-width: 4px;
-    outline-width: 4px;
-    box-shadow: 7px 8px 0 rgb(10 18 12 / 32%);
+    /* Narrow screens scroll rather than shrink; the floor is what stays readable. */
+    --tw: clamp(56px, 13vw, 96px);
+    margin: 2vh 16px;
   }
 
   .hud {
-    left: 12px;
-    right: 12px;
-    bottom: 12px;
+    margin: 0 12px 12px;
     flex-direction: column;
     align-items: stretch;
     gap: 14px;
@@ -444,11 +457,11 @@ button:focus-visible { outline: 4px solid #fff2a8; outline-offset: 3px; }
 
 @media (max-height: 620px) and (orientation: landscape) {
   .pixel-map {
-    --tw: clamp(22px, min(6vw, calc((100vh - 150px) / 6.5)), 64px);
-    top: 2vh;
+    --tw: clamp(56px, 6vw, 96px);
+    margin: 2vh 4vw;
   }
 
-  .hud { left: 4vw; right: 4vw; bottom: 17px; gap: 16px; }
+  .hud { margin: 0 4vw 17px; gap: 16px; }
   .message-window { min-height: 94px; padding: 14px 20px; }
   .controls { gap: 15px; }
   .dpad { grid-template: repeat(3, 30px) / repeat(3, 30px); }
