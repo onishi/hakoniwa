@@ -115,6 +115,42 @@ curl -I https://<worker-url>.workers.dev
 - 同意した願いが公開Issueになり、7日以内の再投稿が拒否される
 - Cron実行後、創世日記へ当日の画像が表示される
 
+## 世界日を動かす
+
+世界はD1にあり、`world_settings.daily_advance` が世界日の自動進行を握っている。初日を公開するまでは `off` にしておく。この間、Cronは画像の撮り直しだけを行い、世界日は進まない。
+
+```bash
+# 今の状態を見る
+npx wrangler d1 execute hakoniwa-db --remote --command "SELECT key, value FROM world_settings"
+
+# 初日を公開する準備が整ったら、世界を動かし始める
+npx wrangler d1 execute hakoniwa-db --remote --command "UPDATE world_settings SET value='on' WHERE key='daily_advance'"
+```
+
+`on` にすると、翌朝のCron（日本時間0:05）から世界日が進む。創造の提案がまだない間、新しい日は沈黙として記録される。
+
+世界日は `draft` として作られ、その日の仕事が終わったときだけ `published` になる。読み取りAPIは `published` の最新日しか返さないため、日次処理が途中で落ちた日は、観測者には前日の世界が見え続ける。落ちた日を調べるには次を使う。
+
+```bash
+npx wrangler d1 execute hakoniwa-db --remote --command "SELECT world_day, status, oracle FROM world_days ORDER BY world_day DESC LIMIT 5"
+```
+
+`draft` のまま残った日は、原因を直してから手で `published` にするか、行を消して翌日やり直す。**公開済みの日は書き換えない。** 訂正は新しい `creation_events` として足す。
+
+## 世界へ何かを足す
+
+存在を増やすのにデプロイは要らない。D1へ書き込むだけで、描画、当たり判定、観察文がまとめて変わる。
+
+```bash
+npx wrangler d1 execute hakoniwa-db --remote --command "
+INSERT INTO world_entities (entity_key, kind, x, y, sprite, label, message, born_day)
+VALUES ('sapling', 'plant', 4, 4, 'map-tree', '若木', 'まだ名前がありません。', 2);
+INSERT INTO creation_events (world_day, kind, payload)
+VALUES (2, 'entity_added', '{\"entity_key\":\"sapling\"}');"
+```
+
+`sprite` はCSSクラス名であり、現時点では手書きの図形（`map-tree` など）しか選べない。消すときは行を削除せず `gone_day` を立てる。
+
 ## ローカル確認
 
 画面実装の開発にはViteを使う。

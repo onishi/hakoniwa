@@ -3,7 +3,8 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from 're
 type Position = { x: number; y: number }
 type Direction = 'up' | 'down' | 'left' | 'right'
 type Panel = 'diary' | 'wish' | 'account' | null
-type DiaryEntry = { worldDay: number; body: string; screenshotUrl: string | null }
+/** A day the god stayed silent still has an entry; its body is simply missing. */
+type DiaryEntry = { worldDay: number; body: string | null; screenshotUrl: string | null }
 type SessionUser = { name: string; avatarUrl: string | null }
 
 type WorldObject = {
@@ -297,7 +298,7 @@ function App() {
             {diary.map(entry => <article className="diary-entry" key={entry.worldDay}>
               <p className="entry-meta">DAY {entry.worldDay}</p>
               {entry.screenshotUrl && <img src={entry.screenshotUrl} alt={`DAY ${entry.worldDay}の世界`} />}
-              <p>{entry.body}</p>
+              {entry.body ? <p>{entry.body}</p> : <p className="entry-silence">この日、神は何も創らなかった。</p>}
             </article>)}
           </>}
           {panel === 'wish' && <>

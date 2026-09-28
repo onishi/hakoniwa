@@ -19,6 +19,16 @@ type User = { id: number; email: string; display_name: string; avatar_url: strin
 const MAP_WIDTH = 12
 const MAP_HEIGHT = 12
 
+/** The newest day that finished its work. A day still being built stays invisible. */
+const publishedDay = (env: Env) =>
+  env.DB.prepare("SELECT world_day, oracle FROM world_days WHERE status = 'published' ORDER BY world_day DESC LIMIT 1")
+    .first<{ world_day: number; oracle: string | null }>()
+
+const setting = async (env: Env, key: string) => {
+  const row = await env.DB.prepare('SELECT value FROM world_settings WHERE key = ?').bind(key).first<{ value: string }>()
+  return row?.value ?? null
+}
+
 const json = (data: unknown, status = 200, headers: HeadersInit = {}) =>
   new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json; charset=utf-8', ...headers } })
 
@@ -115,8 +125,7 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
   }
 
   if (url.pathname === '/api/world' && request.method === 'GET') {
-    const today = await env.DB.prepare('SELECT world_day, oracle FROM world_days ORDER BY world_day DESC LIMIT 1')
-      .first<{ world_day: number; oracle: string | null }>()
+    const today = await publishedDay(env)
     if (!today) return json({ error: 'まだ世界がありません。' }, 503)
 
     // Everything is pinned to the published day, so one visit never mixes two days together.
@@ -143,15 +152,19 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
   }
 
   if (url.pathname === '/api/diary' && request.method === 'GET') {
-    const entries = await env.DB.prepare(`SELECT world_day AS worldDay, body,
-      CASE WHEN screenshot_key IS NULL THEN NULL ELSE '/api/screenshots/' || world_day END AS screenshotUrl,
-      published_at AS publishedAt FROM genesis_diary ORDER BY world_day DESC`).all()
+    // The ledger of days drives the diary, so a day the god stayed silent still has its place.
+    const entries = await env.DB.prepare(`SELECT days.world_day AS worldDay, diary.body,
+      CASE WHEN days.screenshot_key IS NULL THEN NULL ELSE '/api/screenshots/' || days.world_day END AS screenshotUrl,
+      days.published_at AS publishedAt
+      FROM world_days AS days LEFT JOIN genesis_diary AS diary ON diary.world_day = days.world_day
+      WHERE days.status = 'published' ORDER BY days.world_day DESC`).all()
     return json({ entries: entries.results })
   }
 
   if (url.pathname.startsWith('/api/screenshots/') && request.method === 'GET') {
     const worldDay = Number(url.pathname.split('/').at(-1))
-    const row = await env.DB.prepare('SELECT screenshot_key FROM genesis_diary WHERE world_day = ?').bind(worldDay).first<{ screenshot_key: string | null }>()
+    const row = await env.DB.prepare("SELECT screenshot_key FROM world_days WHERE world_day = ? AND status = 'published'")
+      .bind(worldDay).first<{ screenshot_key: string | null }>()
     if (!row?.screenshot_key) return new Response('Not found', { status: 404 })
     const object = await env.SCREENSHOTS.get(row.screenshot_key)
     if (!object) return new Response('Not found', { status: 404 })
@@ -182,8 +195,30 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
   return json({ error: 'Not found' }, 404)
 }
 
+/**
+ * Moves the world on by one day. The new day is built as a draft and only becomes
+ * visible once everything it needs exists, so a failure part way through leaves
+ * observers on yesterday's world rather than on half of today's.
+ */
+async function advanceDay(env: Env) {
+  const current = await env.DB.prepare('SELECT world_day FROM world_days ORDER BY world_day DESC LIMIT 1')
+    .first<{ world_day: number }>()
+  if (!current) return null
+  const nextDay = current.world_day + 1
+
+  // Nothing proposes creations yet, so every new day is a silence until one does.
+  await env.DB.prepare("INSERT INTO world_days (world_day, oracle, status) VALUES (?, NULL, 'draft')")
+    .bind(nextDay).run()
+  await env.DB.prepare("INSERT INTO creation_events (world_day, kind, payload) VALUES (?, 'silence', '{}')")
+    .bind(nextDay).run()
+  await env.DB.prepare("UPDATE world_days SET status = 'published', published_at = CURRENT_TIMESTAMP WHERE world_day = ?")
+    .bind(nextDay).run()
+
+  return nextDay
+}
+
 async function captureToday(env: Env) {
-  const current = await env.DB.prepare('SELECT world_day FROM genesis_diary ORDER BY world_day DESC LIMIT 1').first<{ world_day: number }>()
+  const current = await publishedDay(env)
   if (!current) return
   const browser = await launch(env.BROWSER)
   try {
@@ -193,7 +228,8 @@ async function captureToday(env: Env) {
     const screenshot = await page.screenshot({ type: 'png' })
     const key = `world-days/day-${String(current.world_day).padStart(4, '0')}.png`
     await env.SCREENSHOTS.put(key, screenshot, { httpMetadata: { contentType: 'image/png' } })
-    await env.DB.prepare('UPDATE genesis_diary SET screenshot_key = ? WHERE world_day = ?').bind(key, current.world_day).run()
+    await env.DB.prepare('UPDATE world_days SET screenshot_key = ? WHERE world_day = ?')
+      .bind(key, current.world_day).run()
   } finally {
     await browser.close()
   }
@@ -206,7 +242,17 @@ export default {
     return env.ASSETS.fetch(request)
   },
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext) {
-    // A failed capture must not stop the world; it is logged so the day can be retried.
-    ctx.waitUntil(captureToday(env).catch(error => console.error('capture failed', error)))
+    ctx.waitUntil((async () => {
+      // Until the first day is released, the world holds at Day 1 and only its picture is retaken.
+      if (await setting(env, 'daily_advance') === 'on') {
+        const day = await advanceDay(env).catch(error => {
+          console.error('advance failed', error)
+          return null
+        })
+        if (day) console.log('world day advanced', day)
+      }
+      // A failed capture must not stop the world; it is logged so the day can be retried.
+      await captureToday(env).catch(error => console.error('capture failed', error))
+    })())
   },
 } satisfies ExportedHandler<Env>

@@ -4,6 +4,12 @@
 
 React、TypeScript、ViteのフロントエンドとCloudflare WorkerのAPIで構成する。Google OAuthの利用者、セーブ、願い、創世日記はD1、日次スクリーンショットはR2へ保存し、Browser RenderingをCron Triggerから実行する。
 
+**世界はコードではなくD1にある。** 地形、存在、当たり判定、観察文はすべて行として持ち、クライアントは `GET /api/world` で公開済みの世界日を受け取って描画する。新しい存在の追加はデータベースへの書き込みだけで完結し、デプロイを必要としない。
+
+世界日は draft として作られ、その日の仕事が終わったときだけ published になる。読み取りAPIは published の最新日だけを返すため、日次処理が途中で失敗しても観測者には前日の世界が見え続ける。
+
+初日を公開するまでは `world_settings.daily_advance` を `off` にしておき、世界日を進めない。Cronは画像の撮り直しだけを行う。
+
 ## 想定する本番構成
 
 静的フロントエンドと共有世界のAPIは Cloudflare Workers、データは D1 と R2 を使用する。毎日の創造処理は、さくらインターネットのVPS上のcronから実行する。
@@ -31,12 +37,17 @@ React、TypeScript、ViteのフロントエンドとCloudflare WorkerのAPIで�
 
 ## 最小データモデル
 
-- `world_days`: 世界日、神託、公開時刻、生成モデル、検証結果
-- `users` / `sessions` / `saves`: Google利用者、ハッシュ化したセッション、個人セーブ
-- `genesis_diary`: 世界日、内部の執筆担当、短い本文、R2画像キー。執筆担当は運営専用とし、公開APIへ返さない
-- `world_entities`: 生物・場所・概念・法則。誕生日と消滅日を持つ
+実装済みのものには印を付ける。
+
+- `world_days` ✅: 世界日、神託（NULLは沈黙）、公開状態、公開時刻、R2画像キー
+- `world_settings` ✅: 運営のつまみ。`daily_advance` で世界日の自動進行を切り替える
+- `world_entities` ✅: 生物・場所・概念・法則。誕生日と消滅日、当たり判定、観察文、スプライト定義を持つ
+- `world_tiles` ✅: 既定の草地と異なる地形タイル
+- `creation_events` ✅: 追記型の創造・自律変化ログ。修正も新しい行として足す
+- `users` / `sessions` / `saves` ✅: Google利用者、ハッシュ化したセッション、個人セーブ
+- `genesis_diary` ✅: 世界日、内部の執筆担当、短い本文。執筆担当は運営専用とし、公開APIへ返さない
+- `wishes` ✅: 内部ユーザーID、本文、公開Issueの識別子とURL、作成時刻
 - `relationships`: 捕食、成長、開花、発明など因果関係のグラフ
-- `wishes`: 内部ユーザーID、本文、公開Issueの識別子とURL、作成時刻
 - `wish_links`: 願いと世界要素・創世日記イベントの関係
 - `observations`: 発見日、場所、第一発見者、最終確認日
 - `player_gardens`: 観測者ごとの庭の状態
