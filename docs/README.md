@@ -10,6 +10,7 @@
 - [コンセプト](CONCEPT.md)
 - [最初に作るゲームの仕様](FIRST_GAME_SPEC.md)
 - [Day 100のゲーム仕様](MIDDLE_GAME_SPEC.md)
+- [複数の観測者が遊ぶ世界](SHARED_WORLD_EXPERIENCE.md) — Day 1、Day 100、その間の共有体験
 
 ## 100日の計画
 
