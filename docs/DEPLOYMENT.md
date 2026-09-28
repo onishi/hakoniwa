@@ -144,12 +144,24 @@ npx wrangler d1 execute hakoniwa-db --remote --command "SELECT world_day, status
 ```bash
 npx wrangler d1 execute hakoniwa-db --remote --command "
 INSERT INTO world_entities (entity_key, kind, x, y, sprite, label, message, born_day)
-VALUES ('sapling', 'plant', 4, 4, 'map-tree', '若木', 'まだ名前がありません。', 2);
-INSERT INTO creation_events (world_day, kind, payload)
-VALUES (2, 'entity_added', '{\"entity_key\":\"sapling\"}');"
+VALUES ('sapling', 'plant', 4, 4, 'map-tree', '若木', 'まだ名前がありません。', 2);"
 ```
 
-`sprite` はCSSクラス名であり、現時点では手書きの図形（`map-tree` など）しか選べない。消すときは行を削除せず `gone_day` を立てる。
+`creation_events` へ書く必要はない。**トリガーが、その存在の全項目を含む履歴を自動で残す。** 訂正も同じで、`UPDATE` すれば前後の状態が追記される。
+
+```bash
+# 訂正。前の姿と後の姿が履歴に残る
+npx wrangler d1 execute hakoniwa-db --remote --command "
+UPDATE world_entities SET message='芽が、少しだけ伸びました。' WHERE entity_key='sapling';"
+
+# 消すとき。行は削除せず gone_day を立てる
+npx wrangler d1 execute hakoniwa-db --remote --command "
+UPDATE world_entities SET gone_day=5 WHERE entity_key='sapling';"
+```
+
+`sprite` はCSSクラス名であり、現時点では手書きの図形（`map-tree` など）しか選べない。
+
+**行を `DELETE` しない。** 消滅は `gone_day` で表し、図鑑では「現在は確認されていない」として残す。削除した場合もその事実だけは履歴に残るが、消えた姿は戻らない。
 
 ## ローカル確認
 

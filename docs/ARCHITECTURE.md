@@ -10,6 +10,8 @@ React、TypeScript、ViteのフロントエンドとCloudflare WorkerのAPIで�
 
 初日を公開するまでは `world_settings.daily_advance` を `off` にしておき、世界日を進めない。Cronは画像の撮り直しだけを行う。
 
+**世界への変更は、経路を問わず `creation_events` へ自動で記録される。** 記録はD1のトリガーで行うため、手で書いたSQLであっても、将来のAPIやAIの創造サイクルであっても、書いた者がログを省略できない。訂正は前後の状態を両方残し、消滅は `gone_day` として追記する。行の削除は歴史を消すため使わない。
+
 ## 想定する本番構成
 
 静的フロントエンドと共有世界のAPIは Cloudflare Workers、データは D1 と R2 を使用する。毎日の創造処理は、さくらインターネットのVPS上のcronから実行する。
