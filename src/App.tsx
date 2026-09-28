@@ -34,6 +34,29 @@ type WorldResponse = {
 
 const WALK_MIN = 1
 
+// The last world and diary that arrived, so an outage shows yesterday's garden
+// instead of an empty screen. Browser storage can be absent or throw, so every
+// access is guarded and the game works without it.
+const WORLD_CACHE = 'hakoniwa_last_world'
+const DIARY_CACHE = 'hakoniwa_last_diary'
+
+function readCache<T>(key: string): T | null {
+  try {
+    const raw = localStorage.getItem(key)
+    return raw ? JSON.parse(raw) as T : null
+  } catch {
+    return null
+  }
+}
+
+function writeCache(key: string, value: unknown) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value))
+  } catch {
+    // Private windows and blocked storage are fine; the world simply is not kept.
+  }
+}
+
 /** Everything the renderer needs for one world day, derived once per fetch. */
 type World = {
   day: number
@@ -123,6 +146,8 @@ function App() {
   const [publicConsent, setPublicConsent] = useState(false)
   const [ready, setReady] = useState(false)
   const [world, setWorld] = useState<World | null>(null)
+  /** The world came from the cache, so nothing this visit does is written back. */
+  const [offline, setOffline] = useState(false)
   const saveTimer = useRef<number | undefined>(undefined)
   const lastKeyboardMove = useRef(0)
   const captureMode = new URLSearchParams(location.search).has('capture')
@@ -182,13 +207,35 @@ function App() {
 
   useEffect(() => {
     Promise.all([
-      fetch('/api/session').then(response => response.ok ? response.json() : { user: null }),
-      fetch('/api/diary').then(response => response.ok ? response.json() : { entries: [] }),
-      fetch('/api/world').then(response => response.ok ? response.json() : null),
+      fetch('/api/session').then(response => response.ok ? response.json() : { user: null }).catch(() => ({ user: null })),
+      fetch('/api/diary').then(response => response.ok ? response.json() : null).catch(() => null),
+      fetch('/api/world').then(response => response.ok ? response.json() : null).catch(() => null),
     ]).then(([session, history, worldData]) => {
       setUser(session.user)
-      if (history.entries?.length) setDiary(history.entries)
-      if (worldData) setWorld(buildWorld(worldData))
+
+      if (history?.entries?.length) {
+        setDiary(history.entries)
+        writeCache(DIARY_CACHE, history.entries)
+      } else {
+        const kept = readCache<DiaryEntry[]>(DIARY_CACHE)
+        if (kept?.length) setDiary(kept)
+      }
+
+      if (worldData) {
+        setWorld(buildWorld(worldData))
+        writeCache(WORLD_CACHE, worldData)
+      } else {
+        // The world is unreachable. Show the last one that arrived, read only.
+        setOffline(true)
+        const kept = readCache<WorldResponse>(WORLD_CACHE)
+        if (kept) {
+          setWorld(buildWorld(kept))
+          setMessage('世界に手が届きません。これは、最後に見えていた景色です。')
+        } else {
+          setMessage('世界に手が届きません。しばらくしてから、また来てください。')
+        }
+      }
+
       if (session.user) {
         fetch('/api/save').then(response => response.ok ? response.json() : null).then(result => {
           if (result?.save?.position) setPosition(result.save.position)
@@ -201,7 +248,7 @@ function App() {
   }, [])
 
   useEffect(() => {
-    if (!user || !ready) return
+    if (!user || !ready || offline) return
     window.clearTimeout(saveTimer.current)
     saveTimer.current = window.setTimeout(() => {
       fetch('/api/save', {
@@ -211,7 +258,7 @@ function App() {
       }).catch(() => undefined)
     }, 500)
     return () => window.clearTimeout(saveTimer.current)
-  }, [direction, position, user, ready, world])
+  }, [direction, position, user, ready, world, offline])
 
   const submitWish = async () => {
     setWishStatus('')

@@ -181,9 +181,40 @@ npx wrangler d1 migrations apply hakoniwa-db --local
 
 トークン値を `.env`、シェルスクリプト、ログ、Git管理ファイルへ書かない。
 
+## バックアップと復元
+
+世界はD1にあるため、コードのロールバックと世界の復元は別の操作になる。**コードを戻しても、消えた行は戻らない。**
+
+### 世界の書き出し
+
+危険な操作（マイグレーション、まとめての書き換え、創造の一括適用）の前に取る。
+
+```bash
+npx wrangler d1 export hakoniwa-db --remote --output=backup-$(date +%Y%m%d).sql
+```
+
+全テーブルのスキーマとデータがSQLとして落ちる。保管先はリポジトリの外にする。
+
+### 時点への巻き戻し
+
+D1のTime Travelで、過去の時点へ戻せる。まず現在地のブックマークを控える。
+
+```bash
+npx wrangler d1 time-travel info hakoniwa-db
+npx wrangler d1 time-travel restore hakoniwa-db --timestamp=2026-09-28T00:00:00Z
+```
+
+**巻き戻しは世界の歴史を消す操作である。** 過去を上書きしないという約束に反するため、事故で壊れた場合の最後の手段とし、通常の訂正は新しい `creation_events` として足す。
+
+### 画像
+
+日次スクリーンショットはR2の `hakoniwa-screenshots` にあり、D1の巻き戻しでは戻らない。D1を過去へ戻した場合、`world_days.screenshot_key` が指す画像と実体の対応を確認する。
+
 ## ロールバック
 
-Cloudflare DashboardまたはWranglerで、直前の正常なWorkerバージョンを確認してロールバックする。コードのロールバックと、D1やR2など接続先データのロールバックは別であるため、将来バインディングを追加した場合はデータの整合性を個別に確認する。
+Cloudflare DashboardまたはWranglerで、直前の正常なWorkerバージョンを確認してロールバックする。コードのロールバックと、D1やR2など接続先データのロールバックは別である。
+
+**マイグレーションを含むデプロイを戻すときは順序に注意する。** 新しいコードは新しいテーブルを前提にしているため、コードだけを戻すと動かなくなる場合がある。世界の表示に関わる変更では、先に書き出しを取ってから進める。
 
 ## トラブル対応
 
