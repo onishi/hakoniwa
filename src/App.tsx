@@ -10,68 +10,96 @@ type WorldObject = {
   key: string
   x: number
   y: number
-  width?: number
-  height?: number
-  className: string
+  width: number
+  height: number
+  sprite: string
   message: string
   label: string
-  panel?: Exclude<Panel, null>
+  panel: Exclude<Panel, null> | null
   /** Flat ground-level features (no standing silhouette) sit in the ground layer instead of the depth-sorted layer. */
-  flat?: boolean
+  flat: boolean
+  blocks: boolean
 }
 
-const MAP_WIDTH = 12
-const MAP_HEIGHT = 12
+type WorldTile = { x: number; y: number; kind: string }
+
+type WorldResponse = {
+  worldDay: number
+  oracle: string | null
+  map: { width: number; height: number }
+  entities: WorldObject[]
+  tiles: WorldTile[]
+}
+
 const WALK_MIN = 1
-const WALK_MAX_X = MAP_WIDTH - 2
-const WALK_MAX_Y = MAP_HEIGHT - 2
 
-const objects: WorldObject[] = [
-  { key: 'tree', x: 3, y: 3, className: 'map-tree', message: '世界で最初の木。葉の間で、風が眠っています。', label: 'はじまりの木' },
-  { key: 'house', x: 7, y: 2, width: 2, height: 2, className: 'map-house', message: '小さな家です。中には、まだ誰もいません。', label: '小さな家' },
-  { key: 'well', x: 5, y: 6, className: 'map-well', message: '古い井戸です。水の音はしません。', label: '古い井戸' },
-  { key: 'wish-board', x: 2, y: 8, className: 'map-wish-board', message: '願いを、ひとつだけ。', label: '願いの掲示板', panel: 'wish' },
-  { key: 'pond', x: 7, y: 7, width: 2, height: 2, className: 'map-pond', message: '底はまだ見えません。生き物の気配はありません。', label: '静かな池', flat: true },
-]
+/** Everything the renderer needs for one world day, derived once per fetch. */
+type World = {
+  day: number
+  width: number
+  height: number
+  walkMaxX: number
+  walkMaxY: number
+  objects: WorldObject[]
+  occupiedTiles: Map<string, WorldObject>
+  groundTiles: (Position & { path: boolean })[]
+  fencePoints: string
+  isoUnits: (gx: number, gy: number) => { ux: number; uy: number }
+}
 
-const occupiedTiles = new Map<string, WorldObject>()
+const buildWorld = (data: WorldResponse): World => {
+  const { width, height } = data.map
+  const walkMaxX = width - 2
+  const walkMaxY = height - 2
 
-for (const object of objects) {
-  for (let y = 0; y < (object.height ?? 1); y += 1) {
-    for (let x = 0; x < (object.width ?? 1); x += 1) {
-      occupiedTiles.set(`${object.x + x},${object.y + y}`, object)
+  // Isometric (2:1 diamond) projection: screen offset in half-tile units from the map's left corner.
+  const isoUnits = (gx: number, gy: number) => ({ ux: gx - gy + height, uy: gx + gy })
+
+  const occupiedTiles = new Map<string, WorldObject>()
+  for (const object of data.entities) {
+    if (!object.blocks) continue
+    for (let y = 0; y < object.height; y += 1) {
+      for (let x = 0; x < object.width; x += 1) {
+        occupiedTiles.set(`${object.x + x},${object.y + y}`, object)
+      }
     }
   }
-}
 
-const pathTileKeys = new Set<string>()
-for (let x = WALK_MIN; x <= WALK_MAX_X; x += 1) pathTileKeys.add(`${x},6`)
-for (let y = WALK_MIN; y <= WALK_MAX_Y; y += 1) pathTileKeys.add(`5,${y}`)
+  const pathTileKeys = new Set(data.tiles.filter(tile => tile.kind === 'path').map(tile => `${tile.x},${tile.y}`))
+  const groundTiles: (Position & { path: boolean })[] = []
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      groundTiles.push({ x, y, path: pathTileKeys.has(`${x},${y}`) })
+    }
+  }
 
-const groundTiles: (Position & { path: boolean })[] = []
-for (let y = 0; y < MAP_HEIGHT; y += 1) {
-  for (let x = 0; x < MAP_WIDTH; x += 1) {
-    groundTiles.push({ x, y, path: pathTileKeys.has(`${x},${y}`) })
+  const isoSpan = width + height
+  const isoPercent = (gx: number, gy: number) => {
+    const { ux, uy } = isoUnits(gx, gy)
+    return { x: (ux / isoSpan) * 100, y: (uy / isoSpan) * 100 }
+  }
+
+  // The fence traces the outer edge of the walkable tiles, so it marks exactly where movement stops.
+  const fencePoints = [
+    isoPercent(WALK_MIN, WALK_MIN),
+    isoPercent(walkMaxX + 1, WALK_MIN),
+    isoPercent(walkMaxX + 1, walkMaxY + 1),
+    isoPercent(WALK_MIN, walkMaxY + 1),
+  ].map(point => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(' ')
+
+  return {
+    day: data.worldDay,
+    width,
+    height,
+    walkMaxX,
+    walkMaxY,
+    objects: data.entities,
+    occupiedTiles,
+    groundTiles,
+    fencePoints,
+    isoUnits,
   }
 }
-
-// Isometric (2:1 diamond) projection: screen offset in half-tile units from the map's left corner.
-const isoUnits = (gx: number, gy: number) => ({ ux: gx - gy + MAP_HEIGHT, uy: gx + gy })
-
-const isoSpan = MAP_WIDTH + MAP_HEIGHT
-const isoPercent = (gx: number, gy: number) => {
-  const { ux, uy } = isoUnits(gx, gy)
-  return { x: (ux / isoSpan) * 100, y: (uy / isoSpan) * 100 }
-}
-
-// The fence traces the outer edge of the walkable tiles, so it marks exactly where movement stops.
-const fenceCorners = [
-  isoPercent(WALK_MIN, WALK_MIN),
-  isoPercent(WALK_MAX_X + 1, WALK_MIN),
-  isoPercent(WALK_MAX_X + 1, WALK_MAX_Y + 1),
-  isoPercent(WALK_MIN, WALK_MAX_Y + 1),
-]
-const toPoints = (points: { x: number; y: number }[]) => points.map(point => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(' ')
 
 const directionVectors: Record<Direction, Position> = {
   up: { x: 0, y: -1 },
@@ -93,28 +121,31 @@ function App() {
   const [wishStatus, setWishStatus] = useState('')
   const [publicConsent, setPublicConsent] = useState(false)
   const [ready, setReady] = useState(false)
+  const [world, setWorld] = useState<World | null>(null)
   const saveTimer = useRef<number | undefined>(undefined)
   const lastKeyboardMove = useRef(0)
   const captureMode = new URLSearchParams(location.search).has('capture')
 
   const move = useCallback((nextDirection: Direction) => {
+    if (!world) return
     const vector = directionVectors[nextDirection]
     setDirection(nextDirection)
     setPosition(current => {
       const next = { x: current.x + vector.x, y: current.y + vector.y }
-      const outsideMap = next.x < WALK_MIN || next.x > WALK_MAX_X || next.y < WALK_MIN || next.y > WALK_MAX_Y
+      const outsideMap = next.x < WALK_MIN || next.x > world.walkMaxX || next.y < WALK_MIN || next.y > world.walkMaxY
 
-      if (outsideMap || occupiedTiles.has(`${next.x},${next.y}`)) return current
+      if (outsideMap || world.occupiedTiles.has(`${next.x},${next.y}`)) return current
       return next
     })
-  }, [])
+  }, [world])
 
   const act = useCallback(() => {
+    if (!world) return
     const vector = directionVectors[direction]
-    const target = occupiedTiles.get(`${position.x + vector.x},${position.y + vector.y}`)
+    const target = world.occupiedTiles.get(`${position.x + vector.x},${position.y + vector.y}`)
     setMessage(target?.message ?? '柔らかな土です。けれど、植えるものはまだありません。')
     if (target?.panel) setPanel(target.panel)
-  }, [direction, position])
+  }, [direction, position, world])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -152,9 +183,11 @@ function App() {
     Promise.all([
       fetch('/api/session').then(response => response.ok ? response.json() : { user: null }),
       fetch('/api/diary').then(response => response.ok ? response.json() : { entries: [] }),
-    ]).then(([session, history]) => {
+      fetch('/api/world').then(response => response.ok ? response.json() : null),
+    ]).then(([session, history, worldData]) => {
       setUser(session.user)
       if (history.entries?.length) setDiary(history.entries)
+      if (worldData) setWorld(buildWorld(worldData))
       if (session.user) {
         fetch('/api/save').then(response => response.ok ? response.json() : null).then(result => {
           if (result?.save?.position) setPosition(result.save.position)
@@ -170,10 +203,14 @@ function App() {
     if (!user || !ready) return
     window.clearTimeout(saveTimer.current)
     saveTimer.current = window.setTimeout(() => {
-      fetch('/api/save', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ position, direction, worldDay: 1 }) }).catch(() => undefined)
+      fetch('/api/save', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ position, direction, worldDay: world?.day ?? null }),
+      }).catch(() => undefined)
     }, 500)
     return () => window.clearTimeout(saveTimer.current)
-  }, [direction, position, user, ready])
+  }, [direction, position, user, ready, world])
 
   const submitWish = async () => {
     setWishStatus('')
@@ -190,14 +227,14 @@ function App() {
 
   return (
     <main className={`game-shell ${captureMode ? 'capture-mode' : ''}`}>
-      <section className="world" aria-label="はじまりの庭 Day 1">
+      <section className="world" aria-label={world ? `はじまりの庭 Day ${world.day}` : 'はじまりの庭'}>
         <nav className="world-actions" aria-label="世界の記録">
           <button onClick={() => setPanel('diary')} aria-label="創世日記">▤</button>
           <button onClick={() => setPanel('account')} aria-label="アカウント">●</button>
         </nav>
-        <div className="pixel-map" style={{ '--cols': MAP_WIDTH, '--rows': MAP_HEIGHT } as CSSProperties}>
-          {groundTiles.map(tile => {
-            const { ux, uy } = isoUnits(tile.x + 0.5, tile.y + 0.5)
+        {world && <div className="pixel-map" style={{ '--cols': world.width, '--rows': world.height } as CSSProperties}>
+          {world.groundTiles.map(tile => {
+            const { ux, uy } = world.isoUnits(tile.x + 0.5, tile.y + 0.5)
             const shade = (tile.x + tile.y) % 2 === 0 ? 'tile-light' : 'tile-dark'
             return (
               <div
@@ -209,25 +246,23 @@ function App() {
           })}
 
           <svg className="garden-fence" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-            <polygon points={toPoints(fenceCorners)} />
+            <polygon points={world.fencePoints} />
           </svg>
 
-          {objects.map(object => {
-            const width = object.width ?? 1
-            const height = object.height ?? 1
+          {world.objects.map(object => {
             // Standing sprites hang from the front corner of their footprint; flat ones sit on its centre.
             const { ux, uy } = object.flat
-              ? isoUnits(object.x + width / 2, object.y + height / 2)
-              : isoUnits(object.x + width, object.y + height)
+              ? world.isoUnits(object.x + object.width / 2, object.y + object.height / 2)
+              : world.isoUnits(object.x + object.width, object.y + object.height)
             return (
               <div
                 key={object.key}
-                className={`map-object ${object.className} ${object.flat ? 'is-flat' : ''}`}
+                className={`map-object ${object.sprite} ${object.flat ? 'is-flat' : ''}`}
                 style={{
                   '--ux': ux,
                   '--uy': uy,
-                  '--object-width': width,
-                  '--object-height': height,
+                  '--object-width': object.width,
+                  '--object-height': object.height,
                   zIndex: object.flat ? 3 : Math.round(uy * 100),
                 } as CSSProperties}
                 role="img"
@@ -237,7 +272,7 @@ function App() {
           })}
 
           {ready && (() => {
-            const { ux, uy } = isoUnits(position.x + 1, position.y + 1)
+            const { ux, uy } = world.isoUnits(position.x + 1, position.y + 1)
             return (
               <div
                 className="player"
@@ -247,7 +282,7 @@ function App() {
               ><div className={`player-sprite facing-${direction}`}><span /></div></div>
             )
           })()}
-        </div>
+        </div>}
 
         <div className="hud">
           <div className="message-window" role="status" aria-live="polite"><p>{message || '\u00a0'}</p></div>

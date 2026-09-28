@@ -15,6 +15,10 @@ interface Env {
 
 type User = { id: number; email: string; display_name: string; avatar_url: string | null }
 
+// The garden still has one size. When regions arrive this comes from the world data too.
+const MAP_WIDTH = 12
+const MAP_HEIGHT = 12
+
 const json = (data: unknown, status = 200, headers: HeadersInit = {}) =>
   new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json; charset=utf-8', ...headers } })
 
@@ -108,6 +112,34 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
         DO UPDATE SET data=excluded.data, updated_at=CURRENT_TIMESTAMP`).bind(user.id, encoded).run()
       return json({ ok: true })
     }
+  }
+
+  if (url.pathname === '/api/world' && request.method === 'GET') {
+    const today = await env.DB.prepare('SELECT world_day, oracle FROM world_days ORDER BY world_day DESC LIMIT 1')
+      .first<{ world_day: number; oracle: string | null }>()
+    if (!today) return json({ error: 'まだ世界がありません。' }, 503)
+
+    // Everything is pinned to the published day, so one visit never mixes two days together.
+    const [entities, tiles] = await Promise.all([
+      env.DB.prepare(`SELECT entity_key AS key, x, y, width, height, sprite, label, message, panel, flat, blocks
+        FROM world_entities WHERE born_day <= ?1 AND (gone_day IS NULL OR gone_day > ?1) ORDER BY y, x`)
+        .bind(today.world_day).all<Record<string, unknown>>(),
+      env.DB.prepare(`SELECT x, y, kind FROM world_tiles
+        WHERE born_day <= ?1 AND (gone_day IS NULL OR gone_day > ?1)`)
+        .bind(today.world_day).all<Record<string, unknown>>(),
+    ])
+
+    return json({
+      worldDay: today.world_day,
+      oracle: today.oracle,
+      map: { width: MAP_WIDTH, height: MAP_HEIGHT },
+      entities: entities.results.map(row => ({
+        ...row,
+        flat: Boolean(row.flat),
+        blocks: Boolean(row.blocks),
+      })),
+      tiles: tiles.results,
+    })
   }
 
   if (url.pathname === '/api/diary' && request.method === 'GET') {
