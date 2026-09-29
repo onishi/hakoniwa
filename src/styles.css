@@ -42,6 +42,20 @@ button {
   gap: 10px;
 }
 
+.preview-banner {
+  position: fixed;
+  top: 18px;
+  left: 18px;
+  z-index: 20;
+  padding: 8px 12px;
+  color: #f6edcf;
+  border: 3px solid #29251f;
+  background: #385342;
+  box-shadow: 4px 4px 0 rgb(8 15 10 / 35%);
+  font-size: 13px;
+  pointer-events: none;
+}
+
 .world-actions button,
 .close-button {
   width: 46px;
@@ -86,6 +100,7 @@ button {
 .primary-button, .primary-link { display: inline-block; padding: 11px 18px; color: #f6edcf; border: 3px solid #29251f; background: #385342; font: inherit; text-decoration: none; cursor: pointer; }
 .primary-button:disabled { opacity: .45; cursor: default; }
 .capture-mode .world-actions,
+.capture-mode .preview-banner,
 .capture-mode .hud { display: none; }
 /* Nothing to scroll past during a capture: the whole garden is the picture. */
 .capture-mode .world { overflow: visible; }

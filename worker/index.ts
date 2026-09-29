@@ -11,6 +11,7 @@ interface Env {
   GITHUB_TOKEN: string
   GITHUB_OWNER: string
   GITHUB_REPO: string
+  APP_MODE?: 'day1' | 'evolution'
 }
 
 type User = { id: number; email: string; display_name: string; avatar_url: string | null }
@@ -20,8 +21,11 @@ const MAP_WIDTH = 12
 const MAP_HEIGHT = 12
 
 /** The newest day that finished its work. A day still being built stays invisible. */
+const isPreview = (env: Env) => env.APP_MODE === 'day1' || env.APP_MODE === 'evolution'
+
 const publishedDay = (env: Env) =>
-  env.DB.prepare("SELECT world_day, oracle FROM world_days WHERE status = 'published' ORDER BY world_day DESC LIMIT 1")
+  env.DB.prepare(`SELECT world_day, oracle FROM world_days WHERE status = 'published'
+    ${env.APP_MODE === 'day1' ? 'AND world_day = 1' : ''} ORDER BY world_day DESC LIMIT 1`)
     .first<{ world_day: number; oracle: string | null }>()
 
 const setting = async (env: Env, key: string) => {
@@ -59,7 +63,21 @@ const sessionCookie = (token: string, maxAge: number) =>
   `hakoniwa_session=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}`
 
 async function api(request: Request, env: Env, url: URL): Promise<Response> {
+  if (url.pathname === '/api/preview-login' && request.method === 'POST' && isPreview(env)) {
+    if (request.headers.get('origin') !== url.origin) return json({ error: 'このページから操作してください。' }, 403)
+    const identity = randomToken()
+    await env.DB.prepare('INSERT INTO users (google_sub, email, display_name) VALUES (?, ?, ?)')
+      .bind(`preview:${identity}`, 'preview@example.invalid', '検証中の観測者').run()
+    const user = await env.DB.prepare('SELECT id FROM users WHERE google_sub = ?')
+      .bind(`preview:${identity}`).first<{ id: number }>()
+    const session = randomToken()
+    await env.DB.prepare("INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, datetime('now', '+30 days'))")
+      .bind(await hash(session), user!.id).run()
+    return json({ ok: true }, 200, { 'set-cookie': sessionCookie(session, 60 * 60 * 24 * 30) })
+  }
+
   if (url.pathname === '/api/auth/google' && request.method === 'GET') {
+    if (isPreview(env)) return json({ error: 'この環境ではGoogleログインを使用しません。' }, 404)
     const state = randomToken()
     await env.DB.prepare("INSERT INTO oauth_states (state_hash, expires_at) VALUES (?, datetime('now', '+10 minutes'))")
       .bind(await hash(state)).run()
@@ -70,6 +88,7 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
   }
 
   if (url.pathname === '/api/auth/google/callback' && request.method === 'GET') {
+    if (isPreview(env)) return json({ error: 'この環境ではGoogleログインを使用しません。' }, 404)
     const state = url.searchParams.get('state')
     const code = url.searchParams.get('code')
     if (!state || !code) return json({ error: '認証を完了できませんでした。' }, 400)
@@ -98,7 +117,7 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
 
   if (url.pathname === '/api/session' && request.method === 'GET') {
     const user = await currentUser(request, env)
-    return json({ user: user ? { name: user.display_name, avatarUrl: user.avatar_url } : null })
+    return json({ user: user ? { name: user.display_name, avatarUrl: user.avatar_url } : null, mode: env.APP_MODE ?? 'production' })
   }
 
   if (url.pathname === '/api/logout' && request.method === 'POST') {
@@ -157,7 +176,8 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
       CASE WHEN days.screenshot_key IS NULL THEN NULL ELSE '/api/screenshots/' || days.world_day END AS screenshotUrl,
       days.published_at AS publishedAt
       FROM world_days AS days LEFT JOIN genesis_diary AS diary ON diary.world_day = days.world_day
-      WHERE days.status = 'published' ORDER BY days.world_day DESC`).all()
+      WHERE days.status = 'published' AND (? IS NULL OR days.world_day <= ?)
+      ORDER BY days.world_day DESC`).bind(env.APP_MODE === 'day1' ? 1 : null, env.APP_MODE === 'day1' ? 1 : null).all()
     return json({ entries: entries.results })
   }
 
@@ -176,10 +196,15 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
     if (!user) return json({ error: '願うにはログインしてください。' }, 401)
     const input = await request.json<{ body?: string; publicConsent?: boolean }>()
     const body = input.body?.trim() ?? ''
-    if (!input.publicConsent) return json({ error: '公開への同意が必要です。' }, 400)
+    if (!isPreview(env) && !input.publicConsent) return json({ error: '公開への同意が必要です。' }, 400)
     if (!body || body.length > 280) return json({ error: '願いは1〜280文字で書いてください。' }, 400)
     const recent = await env.DB.prepare("SELECT id FROM wishes WHERE user_id = ? AND created_at > datetime('now', '-7 days')").bind(user.id).first()
     if (recent) return json({ error: '次に願える日を待ってください。' }, 429)
+    if (isPreview(env)) {
+      await env.DB.prepare('INSERT INTO wishes (user_id, body, issue_number, issue_url) VALUES (?, ?, 0, ?)')
+        .bind(user.id, body, '').run()
+      return json({ issueUrl: null }, 201)
+    }
     const issueResponse = await fetch(`https://api.github.com/repos/${env.GITHUB_OWNER}/${env.GITHUB_REPO}/issues`, {
       method: 'POST',
       headers: { authorization: `Bearer ${env.GITHUB_TOKEN}`, accept: 'application/vnd.github+json', 'content-type': 'application/json', 'user-agent': 'hakoniwa-worker' },
@@ -238,10 +263,14 @@ async function captureToday(env: Env) {
 export default {
   async fetch(request: Request, env: Env) {
     const url = new URL(request.url)
-    if (url.pathname.startsWith('/api/')) return api(request, env, url)
-    return env.ASSETS.fetch(request)
+    const response = url.pathname.startsWith('/api/') ? await api(request, env, url) : await env.ASSETS.fetch(request)
+    if (!isPreview(env)) return response
+    const previewResponse = new Response(response.body, response)
+    previewResponse.headers.set('x-robots-tag', 'noindex, nofollow')
+    return previewResponse
   },
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext) {
+    if (isPreview(env)) return
     ctx.waitUntil((async () => {
       // Until the first day is released, the world holds at Day 1 and only its picture is retaken.
       if (await setting(env, 'daily_advance') === 'on') {

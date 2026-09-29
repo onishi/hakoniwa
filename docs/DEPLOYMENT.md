@@ -119,11 +119,13 @@ curl -I https://<worker-url>.workers.dev
 
 世界はD1にあり、`world_settings.daily_advance` が世界日の自動進行を握っている。初日を公開するまでは `off` にしておく。この間、Cronは画像の撮り直しだけを行い、世界日は進まない。
 
+**Day 1を基準として保ち、Day 5・10の候補を先に試す間は、本番の設定を `off` のままにする。** 下の `on` への変更は現行機能の説明であり、検証済み候補の承認・公開を行う手順ではない。実際にDay 2を公開する前に、[開発検証と公開ゲート](DEVELOPMENT_VALIDATION.md) を実装・実証する。
+
 ```bash
 # 今の状態を見る
 npx wrangler d1 execute hakoniwa-db --remote --command "SELECT key, value FROM world_settings"
 
-# 初日を公開する準備が整ったら、世界を動かし始める
+# 公開ゲートを実装・検証し、承認済みの日を自動進行させる場合だけ実行する
 npx wrangler d1 execute hakoniwa-db --remote --command "UPDATE world_settings SET value='on' WHERE key='daily_advance'"
 ```
 

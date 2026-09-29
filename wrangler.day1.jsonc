@@ -1,0 +1,27 @@
+{
+  "name": "hakoniwa-day1",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-09-24",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "assets": {
+    "binding": "ASSETS",
+    "directory": "./dist",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "hakoniwa-day1-db",
+    "database_id": "677be5dd-400b-4fa8-8af4-ef38d852020c",
+    "migrations_dir": "migrations"
+  }],
+  "r2_buckets": [{
+    "binding": "SCREENSHOTS",
+    "bucket_name": "hakoniwa-day1-screenshots"
+  }],
+  "vars": {
+    "APP_MODE": "day1",
+    "PUBLIC_ORIGIN": "https://hakoniwa-day1.wagaya.workers.dev"
+  }
+}

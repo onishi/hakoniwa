@@ -6,6 +6,7 @@ type Panel = 'diary' | 'wish' | 'account' | null
 /** A day the god stayed silent still has an entry; its body is simply missing. */
 type DiaryEntry = { worldDay: number; body: string | null; screenshotUrl: string | null }
 type SessionUser = { name: string; avatarUrl: string | null }
+type AppMode = 'production' | 'day1' | 'evolution'
 
 type WorldObject = {
   key: string
@@ -138,6 +139,7 @@ function App() {
   const [message, setMessage] = useState('')
   const [panel, setPanel] = useState<Panel>(null)
   const [user, setUser] = useState<SessionUser | null>(null)
+  const [mode, setMode] = useState<AppMode>('production')
   const [diary, setDiary] = useState<DiaryEntry[]>([
     { worldDay: 1, body: '土と木と池を創りました。あなたが来てくれて、うれしい。', screenshotUrl: null },
   ])
@@ -218,6 +220,7 @@ function App() {
       fetch('/api/world').then(response => response.ok ? response.json() : null).catch(() => null),
     ]).then(([session, history, worldData]) => {
       setUser(session.user)
+      if (session.mode === 'day1' || session.mode === 'evolution') setMode(session.mode)
 
       if (history?.entries?.length) {
         setDiary(history.entries)
@@ -276,11 +279,20 @@ function App() {
     if (!response.ok) return setWishStatus(result.error ?? '願いを届けられませんでした。')
     setWish('')
     setPublicConsent(false)
-    setWishStatus('願いは、世界へ届きました。')
+    setWishStatus(mode === 'production' ? '願いは、世界へ届きました。' : '検証用の願いを保存しました。')
   }
+
+  const previewLogin = async () => {
+    const response = await fetch('/api/preview-login', { method: 'POST' })
+    if (response.ok) location.reload()
+    else setMessage('検証用の記録を始められませんでした。')
+  }
+
+  const preview = mode !== 'production'
 
   return (
     <main className={`game-shell ${captureMode ? 'capture-mode' : ''}`}>
+      {preview && <div className="preview-banner">{mode === 'day1' ? 'DAY 1 保存版' : `進化テスト · DAY ${world?.day ?? '…'}`}</div>}
       <section className="world" aria-label={world ? `はじまりの庭 Day ${world.day}` : 'はじまりの庭'}>
         <nav className="world-actions" aria-label="世界の記録">
           <button onClick={() => setPanel('diary')} aria-label="創世日記">▤</button>
@@ -358,10 +370,13 @@ function App() {
           </>}
           {panel === 'wish' && <>
             <h1>願い事</h1>
-            {!user ? <><p>願うには、名を預けてください。</p><a className="primary-link" href="/api/auth/google">Googleでログイン</a></> : <>
+            {!user ? <><p>願うには、名を預けてください。</p>{preview
+              ? <button className="primary-button" onClick={previewLogin}>検証用の記録を始める</button>
+              : <a className="primary-link" href="/api/auth/google">Googleでログイン</a>}</> : <>
               <textarea value={wish} onChange={event => setWish(event.target.value)} maxLength={280} placeholder="願いをひとつ" aria-label="願い事" />
-              <label className="consent"><input type="checkbox" checked={publicConsent} onChange={event => setPublicConsent(event.target.checked)} /> この願いは公開GitHub Issueになります。誰でも読めることに同意します。</label>
-              <button className="primary-button" onClick={submitWish} disabled={!wish.trim() || !publicConsent}>願う</button>
+              {preview ? <p className="small-text">この願いは検証環境にだけ保存され、公開されません。</p>
+                : <label className="consent"><input type="checkbox" checked={publicConsent} onChange={event => setPublicConsent(event.target.checked)} /> この願いは公開GitHub Issueになります。誰でも読めることに同意します。</label>}
+              <button className="primary-button" onClick={submitWish} disabled={!wish.trim() || (!preview && !publicConsent)}>願う</button>
               <p className="small-text">願えるのは7日間にひとつです。個人情報や秘密は書かないでください。</p>
               {wishStatus && <p role="status">{wishStatus}</p>}
             </>}
@@ -369,7 +384,9 @@ function App() {
           {panel === 'account' && <>
             <h1>記憶</h1>
             {user ? <><p>{user.name} の世界は、ここに残ります。</p><button className="primary-button" onClick={async () => { await fetch('/api/logout', { method: 'POST' }); location.reload() }}>ログアウト</button></>
-              : <><p>名を預けると、旅の続きを残せます。</p><a className="primary-link" href="/api/auth/google">Googleでログイン</a></>}
+              : <><p>名を預けると、旅の続きを残せます。</p>{preview
+                ? <button className="primary-button" onClick={previewLogin}>検証用の記録を始める</button>
+                : <a className="primary-link" href="/api/auth/google">Googleでログイン</a>}</>}
           </>}
         </section>
       </div>}

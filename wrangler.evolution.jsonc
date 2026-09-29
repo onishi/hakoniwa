@@ -1,0 +1,27 @@
+{
+  "name": "hakoniwa-evolution",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-09-24",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "assets": {
+    "binding": "ASSETS",
+    "directory": "./dist",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "hakoniwa-evolution-db",
+    "database_id": "ee6d7926-03b1-46b0-99eb-eacad1812157",
+    "migrations_dir": "migrations"
+  }],
+  "r2_buckets": [{
+    "binding": "SCREENSHOTS",
+    "bucket_name": "hakoniwa-evolution-screenshots"
+  }],
+  "vars": {
+    "APP_MODE": "evolution",
+    "PUBLIC_ORIGIN": "https://hakoniwa-evolution.wagaya.workers.dev"
+  }
+}
