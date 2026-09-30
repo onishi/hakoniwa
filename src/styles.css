@@ -211,7 +211,10 @@ button {
   height: calc(var(--tw) * .58);
   transform: translate(calc(var(--ux) * var(--tw) / 2 - 50%), calc(var(--uy) * var(--th) / 2 - 65%));
   z-index: 8;
+  cursor: pointer;
 }
+
+.map-item:focus-visible { outline: 3px solid #f6edcf; outline-offset: 4px; }
 
 .map-item i:first-child {
   position: absolute;

@@ -175,27 +175,31 @@ function App() {
     })
   }, [world])
 
+  const pickUp = useCallback((target: WorldObject) => {
+    if (!user) {
+      setMessage('拾うには、まず検証用の記録を始めてください。')
+      return
+    }
+    fetch('/api/pickup', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key: target.key }) })
+      .then(async response => ({ response, result: await response.json() as { error?: string } }))
+      .then(({ response, result }) => {
+        setMessage(response.ok ? `${target.label}を手に取りました。` : (result.error ?? '拾えませんでした。'))
+        if (response.ok) setInventory(current => current.some(item => item.key === target.key) ? current : [...current, { key: target.key, quantity: 1, firstPickedDay: world?.day ?? 5 }])
+      })
+      .catch(() => setMessage('拾ったものを記録できませんでした。'))
+  }, [user, world])
+
   const act = useCallback(() => {
     if (!world) return
     const vector = directionVectors[direction]
     const target = world.interactionTiles.get(`${position.x + vector.x},${position.y + vector.y}`)
     if (target?.kind === 'item') {
-      if (!user) {
-        setMessage('拾うには、まず検証用の記録を始めてください。')
-        return
-      }
-      fetch('/api/pickup', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key: target.key }) })
-        .then(async response => ({ response, result: await response.json() as { error?: string } }))
-        .then(({ response, result }) => {
-          setMessage(response.ok ? `${target.label}を手に取りました。` : (result.error ?? '拾えませんでした。'))
-          if (response.ok) setInventory(current => current.some(item => item.key === target.key) ? current : [...current, { key: target.key, quantity: 1, firstPickedDay: world.day }])
-        })
-        .catch(() => setMessage('拾ったものを記録できませんでした。'))
+      pickUp(target)
       return
     }
     setMessage(target?.message ?? '柔らかな土です。けれど、植えるものはまだありません。')
     if (target?.panel) setPanel(target.panel)
-  }, [direction, position, user, world])
+  }, [direction, pickUp, position, world])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -362,6 +366,9 @@ function App() {
                 } as CSSProperties}
                 role="img"
                 aria-label={object.label}
+                onClick={() => object.kind === 'item' && pickUp(object)}
+                onKeyDown={event => { if (object.kind === 'item' && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); pickUp(object) } }}
+                tabIndex={object.kind === 'item' ? 0 : undefined}
               ><i /><i /><i /></div>
             )
           })}
