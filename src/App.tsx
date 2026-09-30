@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from 're
 
 type Position = { x: number; y: number }
 type Direction = 'up' | 'down' | 'left' | 'right'
-type Panel = 'diary' | 'wish' | 'account' | null
+type Panel = 'diary' | 'wish' | 'account' | 'inventory' | null
 /** A day the god stayed silent still has an entry; its body is simply missing. */
 type DiaryEntry = { worldDay: number; body: string | null; screenshotUrl: string | null }
 type SessionUser = { name: string; avatarUrl: string | null }
@@ -10,6 +10,7 @@ type AppMode = 'production' | 'day1' | 'evolution'
 
 type WorldObject = {
   key: string
+  kind: string
   x: number
   y: number
   width: number
@@ -67,6 +68,7 @@ type World = {
   walkMaxY: number
   objects: WorldObject[]
   occupiedTiles: Map<string, WorldObject>
+  interactionTiles: Map<string, WorldObject>
   groundTiles: (Position & { path: boolean })[]
   fencePoints: string
   isoUnits: (gx: number, gy: number) => { ux: number; uy: number }
@@ -81,11 +83,13 @@ const buildWorld = (data: WorldResponse): World => {
   const isoUnits = (gx: number, gy: number) => ({ ux: gx - gy + height, uy: gx + gy })
 
   const occupiedTiles = new Map<string, WorldObject>()
+  const interactionTiles = new Map<string, WorldObject>()
   for (const object of data.entities) {
-    if (!object.blocks) continue
     for (let y = 0; y < object.height; y += 1) {
       for (let x = 0; x < object.width; x += 1) {
-        occupiedTiles.set(`${object.x + x},${object.y + y}`, object)
+        const key = `${object.x + x},${object.y + y}`
+        interactionTiles.set(key, object)
+        if (object.blocks) occupiedTiles.set(key, object)
       }
     }
   }
@@ -120,6 +124,7 @@ const buildWorld = (data: WorldResponse): World => {
     walkMaxY,
     objects: data.entities,
     occupiedTiles,
+    interactionTiles,
     groundTiles,
     fencePoints,
     isoUnits,
@@ -148,6 +153,8 @@ function App() {
   const [publicConsent, setPublicConsent] = useState(false)
   const [ready, setReady] = useState(false)
   const [world, setWorld] = useState<World | null>(null)
+  const [inventory, setInventory] = useState<{ key: string; quantity: number; firstPickedDay: number }[]>([])
+  const [inventoryStatus, setInventoryStatus] = useState('')
   /** The world came from the cache, so nothing this visit does is written back. */
   const [offline, setOffline] = useState(false)
   const saveTimer = useRef<number | undefined>(undefined)
@@ -171,10 +178,24 @@ function App() {
   const act = useCallback(() => {
     if (!world) return
     const vector = directionVectors[direction]
-    const target = world.occupiedTiles.get(`${position.x + vector.x},${position.y + vector.y}`)
+    const target = world.interactionTiles.get(`${position.x + vector.x},${position.y + vector.y}`)
+    if (target?.kind === 'item') {
+      if (!user) {
+        setMessage('拾うには、まず検証用の記録を始めてください。')
+        return
+      }
+      fetch('/api/pickup', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key: target.key }) })
+        .then(async response => ({ response, result: await response.json() as { error?: string } }))
+        .then(({ response, result }) => {
+          setMessage(response.ok ? `${target.label}を手に取りました。` : (result.error ?? '拾えませんでした。'))
+          if (response.ok) setInventory(current => current.some(item => item.key === target.key) ? current : [...current, { key: target.key, quantity: 1, firstPickedDay: world.day }])
+        })
+        .catch(() => setMessage('拾ったものを記録できませんでした。'))
+      return
+    }
     setMessage(target?.message ?? '柔らかな土です。けれど、植えるものはまだありません。')
     if (target?.panel) setPanel(target.panel)
-  }, [direction, position, world])
+  }, [direction, position, user, world])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -257,6 +278,13 @@ function App() {
   }, [])
 
   useEffect(() => {
+    if (!user || !world || world.day < 5) return
+    fetch('/api/inventory').then(response => response.ok ? response.json() : null).then(result => {
+      if (result?.items) setInventory(result.items)
+    }).catch(() => undefined)
+  }, [user, world])
+
+  useEffect(() => {
     if (!user || !ready || offline) return
     window.clearTimeout(saveTimer.current)
     saveTimer.current = window.setTimeout(() => {
@@ -296,6 +324,7 @@ function App() {
       <section className="world" aria-label={world ? `はじまりの庭 Day ${world.day}` : 'はじまりの庭'}>
         <nav className="world-actions" aria-label="世界の記録">
           <button onClick={() => setPanel('diary')} aria-label="創世日記">▤</button>
+          {world?.day && world.day >= 5 && <button onClick={() => { setInventoryStatus(''); setPanel('inventory') }} aria-label="持ち物">▣</button>}
           <button onClick={() => setPanel('account')} aria-label="アカウント">●</button>
         </nav>
         {world && <div className="pixel-map" style={{ '--cols': world.width, '--rows': world.height } as CSSProperties}>
@@ -358,7 +387,7 @@ function App() {
         <Controls move={move} act={act} />
       </div>
       {panel && <div className="overlay" role="presentation" onMouseDown={event => event.target === event.currentTarget && setPanel(null)}>
-        <section className="record-window" role="dialog" aria-modal="true" aria-label={panel === 'diary' ? '創世日記' : panel === 'wish' ? '願い事' : 'アカウント'}>
+          <section className="record-window" role="dialog" aria-modal="true" aria-label={panel === 'diary' ? '創世日記' : panel === 'wish' ? '願い事' : panel === 'inventory' ? '持ち物' : 'アカウント'}>
           <button className="close-button" onClick={() => setPanel(null)} aria-label="閉じる">×</button>
           {panel === 'diary' && <>
             <h1>創世日記</h1>
@@ -380,6 +409,13 @@ function App() {
               <p className="small-text">願えるのは7日間にひとつです。個人情報や秘密は書かないでください。</p>
               {wishStatus && <p role="status">{wishStatus}</p>}
             </>}
+          </>}
+          {panel === 'inventory' && <>
+            <h1>持ち物</h1>
+            {!user ? <p>持ち物を見るには、記録を始めてください。</p> : inventory.length === 0
+              ? <p className="small-text">まだ、手に持っているものはありません。</p>
+              : <ul className="inventory-list">{inventory.map(item => <li key={item.key}><span>{item.key}</span><strong>×{item.quantity}</strong></li>)}</ul>}
+            {inventoryStatus && <p role="status">{inventoryStatus}</p>}
           </>}
           {panel === 'account' && <>
             <h1>記憶</h1>

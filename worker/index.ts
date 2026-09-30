@@ -143,13 +143,38 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
     }
   }
 
+  if (url.pathname === '/api/inventory' && request.method === 'GET') {
+    const user = await currentUser(request, env)
+    if (!user) return json({ error: '持ち物を見るにはログインしてください。' }, 401)
+    const items = await env.DB.prepare(`SELECT item_key AS key, quantity, first_picked_day AS firstPickedDay
+      FROM player_items WHERE user_id = ? ORDER BY first_picked_day, item_key`).bind(user.id).all()
+    return json({ items: items.results })
+  }
+
+  if (url.pathname === '/api/pickup' && request.method === 'POST') {
+    const user = await currentUser(request, env)
+    if (!user) return json({ error: '拾うには検証用の記録を始めてください。' }, 401)
+    const input = await request.json<{ key?: string }>()
+    const key = input.key?.trim() ?? ''
+    const today = await publishedDay(env)
+    if (!key || !today || today.world_day < 4) return json({ error: 'まだ拾えるものはありません。' }, 400)
+    const object = await env.DB.prepare(`SELECT entity_key FROM world_entities
+      WHERE entity_key = ? AND kind = 'item' AND born_day <= ? AND (gone_day IS NULL OR gone_day > ?)`)
+      .bind(key, today.world_day, today.world_day).first<{ entity_key: string }>()
+    if (!object) return json({ error: 'そこには拾えるものがありません。' }, 404)
+    const result = await env.DB.prepare(`INSERT OR IGNORE INTO player_items (user_id, item_key, quantity, first_picked_day)
+      VALUES (?, ?, 1, ?)`).bind(user.id, key, today.world_day).run()
+    if (!result.meta.changes) return json({ error: 'それは、もう手に持っています。' }, 409)
+    return json({ ok: true, item: { key, quantity: 1, firstPickedDay: today.world_day } }, 201)
+  }
+
   if (url.pathname === '/api/world' && request.method === 'GET') {
     const today = await publishedDay(env)
     if (!today) return json({ error: 'まだ世界がありません。' }, 503)
 
     // Everything is pinned to the published day, so one visit never mixes two days together.
     const [entities, tiles] = await Promise.all([
-      env.DB.prepare(`SELECT entity_key AS key, x, y, width, height, sprite, label, message, panel, flat, blocks
+      env.DB.prepare(`SELECT entity_key AS key, kind, x, y, width, height, sprite, label, message, panel, flat, blocks
         FROM world_entities WHERE born_day <= ?1 AND (gone_day IS NULL OR gone_day > ?1) ORDER BY y, x`)
         .bind(today.world_day).all<Record<string, unknown>>(),
       env.DB.prepare(`SELECT x, y, kind FROM world_tiles
