@@ -146,8 +146,10 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
   if (url.pathname === '/api/inventory' && request.method === 'GET') {
     const user = await currentUser(request, env)
     if (!user) return json({ error: '持ち物を見るにはログインしてください。' }, 401)
-    const items = await env.DB.prepare(`SELECT item_key AS key, quantity, first_picked_day AS firstPickedDay
-      FROM player_items WHERE user_id = ? ORDER BY first_picked_day, item_key`).bind(user.id).all()
+    const items = await env.DB.prepare(`SELECT player_items.item_key AS key, world_entities.label,
+      player_items.quantity, player_items.first_picked_day AS firstPickedDay
+      FROM player_items LEFT JOIN world_entities ON world_entities.entity_key = player_items.item_key
+      WHERE player_items.user_id = ? ORDER BY player_items.first_picked_day, player_items.item_key`).bind(user.id).all()
     return json({ items: items.results })
   }
 

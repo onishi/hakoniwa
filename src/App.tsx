@@ -153,7 +153,7 @@ function App() {
   const [publicConsent, setPublicConsent] = useState(false)
   const [ready, setReady] = useState(false)
   const [world, setWorld] = useState<World | null>(null)
-  const [inventory, setInventory] = useState<{ key: string; quantity: number; firstPickedDay: number }[]>([])
+  const [inventory, setInventory] = useState<{ key: string; label?: string; quantity: number; firstPickedDay: number }[]>([])
   const [inventoryStatus, setInventoryStatus] = useState('')
   /** The world came from the cache, so nothing this visit does is written back. */
   const [offline, setOffline] = useState(false)
@@ -185,7 +185,7 @@ function App() {
       .then(({ response, result }) => {
         setMessage(response.ok ? `${target.label}を手に取りました。` : (result.error ?? '拾えませんでした。'))
         if (response.ok) {
-          setInventory(current => current.some(item => item.key === target.key) ? current : [...current, { key: target.key, quantity: 1, firstPickedDay: world?.day ?? 5 }])
+          setInventory(current => current.some(item => item.key === target.key) ? current : [...current, { key: target.key, label: target.label, quantity: 1, firstPickedDay: world?.day ?? 5 }])
           setWorld(current => {
             if (!current) return current
             const objects = current.objects.filter(object => object.key !== target.key)
@@ -433,7 +433,7 @@ function App() {
             <h1>持ち物</h1>
             {!user ? <p>持ち物を見るには、記録を始めてください。</p> : inventory.length === 0
               ? <p className="small-text">まだ、手に持っているものはありません。</p>
-              : <ul className="inventory-list">{inventory.map(item => <li key={item.key}><span>{item.key}</span><strong>×{item.quantity}</strong></li>)}</ul>}
+              : <ul className="inventory-list">{inventory.map(item => <li key={item.key}><span>{item.label ?? item.key}</span><strong>×{item.quantity}</strong></li>)}</ul>}
             {inventoryStatus && <p role="status">{inventoryStatus}</p>}
           </>}
           {panel === 'account' && <>
