@@ -202,7 +202,10 @@ button {
 .map-wish-board,
 .map-well,
 .map-house,
-.map-item {
+.map-item,
+.map-berry,
+.map-branch,
+.map-stone {
   background: radial-gradient(ellipse 30% 11% at 50% 76%, rgb(22 42 26 / 30%) 0 99%, transparent 100%);
 }
 
@@ -213,7 +216,7 @@ button {
   z-index: 8;
 }
 
-.map-item i:first-child {
+.map-berry i:first-child {
   position: absolute;
   left: 27%;
   top: 30%;
@@ -224,7 +227,7 @@ button {
   box-shadow: 8px 2px 0 #b64d39, 3px -4px 0 #e38b4f;
 }
 
-.map-item i:nth-child(2) {
+.map-berry i:nth-child(2) {
   position: absolute;
   left: 48%;
   top: 18%;
@@ -233,6 +236,39 @@ button {
   border-radius: 80% 0;
   background: #4e8545;
   transform: rotate(-18deg);
+}
+
+.map-branch i:first-child {
+  position: absolute;
+  left: 8%;
+  top: 48%;
+  width: 86%;
+  height: 14%;
+  border-radius: 40% 60% 45% 55%;
+  background: linear-gradient(90deg, #5b3b24, #a36b3e 48%, #4b301f);
+  transform: rotate(-28deg);
+  box-shadow: 14px -8px 0 -4px #704729;
+}
+
+.map-branch i:nth-child(2) {
+  position: absolute;
+  left: 52%;
+  top: 25%;
+  width: 10%;
+  height: 40%;
+  background: #714729;
+  transform: rotate(32deg);
+}
+
+.map-stone i:first-child {
+  position: absolute;
+  left: 14%;
+  top: 28%;
+  width: 72%;
+  height: 50%;
+  border-radius: 48% 52% 44% 56%;
+  background: radial-gradient(circle at 35% 25%, #d6d0b8 0 12%, #9a9584 13% 45%, #67685f 72%);
+  box-shadow: 5px 4px 0 #4b5049;
 }
 
 .inventory-list { list-style: none; padding: 0; margin: 0; }

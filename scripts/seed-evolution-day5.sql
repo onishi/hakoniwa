@@ -6,10 +6,13 @@ INSERT OR IGNORE INTO creation_events (world_day, kind, payload) VALUES (3, 'ora
 INSERT OR IGNORE INTO world_days (world_day, oracle, status) VALUES (4, '拾えるものを置きました。手に取れば、あなたの旅についてきます。', 'published');
 INSERT OR IGNORE INTO genesis_diary (world_day, god, body) VALUES (4, 'CLAUDE', '拾えるものを置きました。手に取れば、あなたの旅についてきます。');
 INSERT OR IGNORE INTO creation_events (world_day, kind, payload) VALUES (4, 'oracle', '{"body":"拾えるものを置きました。手に取れば、あなたの旅についてきます。"}');
+UPDATE world_entities SET sprite = 'map-berry' WHERE entity_key = 'item-berry';
+UPDATE world_entities SET sprite = 'map-branch' WHERE entity_key = 'item-branch';
+UPDATE world_entities SET sprite = 'map-stone' WHERE entity_key = 'item-stone';
 INSERT OR IGNORE INTO world_entities (entity_key, kind, x, y, width, height, sprite, label, message, panel, flat, blocks, born_day) VALUES
-  ('item-berry', 'item', 4, 4, 1, 1, 'map-item', '赤い実', '赤い実です。手に取れそうです。', NULL, 0, 0, 4),
-  ('item-branch', 'item', 6, 8, 1, 1, 'map-item', '細い枝', '乾いた枝です。軽くて、手になじみます。', NULL, 0, 0, 4),
-  ('item-stone', 'item', 8, 5, 1, 1, 'map-item', '丸い石', '丸い石です。水に磨かれています。', NULL, 0, 0, 4);
+  ('item-berry', 'item', 4, 4, 1, 1, 'map-berry', '赤い実', '赤い実です。手に取れそうです。', NULL, 0, 0, 4),
+  ('item-branch', 'item', 6, 8, 1, 1, 'map-branch', '細い枝', '乾いた枝です。軽くて、手になじみます。', NULL, 0, 0, 4),
+  ('item-stone', 'item', 8, 5, 1, 1, 'map-stone', '丸い石', '丸い石です。水に磨かれています。', NULL, 0, 0, 4);
 INSERT OR IGNORE INTO world_days (world_day, oracle, status) VALUES (5, '手に持ったものを、いつでも確かめられるようにしました。', 'published');
 INSERT OR IGNORE INTO genesis_diary (world_day, god, body) VALUES (5, 'CLAUDE', '手に持ったものを、いつでも確かめられるようにしました。');
 INSERT OR IGNORE INTO creation_events (world_day, kind, payload) VALUES (5, 'oracle', '{"body":"手に持ったものを、いつでも確かめられるようにしました。"}');
