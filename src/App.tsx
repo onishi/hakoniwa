@@ -184,7 +184,18 @@ function App() {
       .then(async response => ({ response, result: await response.json() as { error?: string } }))
       .then(({ response, result }) => {
         setMessage(response.ok ? `${target.label}を手に取りました。` : (result.error ?? '拾えませんでした。'))
-        if (response.ok) setInventory(current => current.some(item => item.key === target.key) ? current : [...current, { key: target.key, quantity: 1, firstPickedDay: world?.day ?? 5 }])
+        if (response.ok) {
+          setInventory(current => current.some(item => item.key === target.key) ? current : [...current, { key: target.key, quantity: 1, firstPickedDay: world?.day ?? 5 }])
+          setWorld(current => {
+            if (!current) return current
+            const objects = current.objects.filter(object => object.key !== target.key)
+            const interactionTiles = new Map(current.interactionTiles)
+            for (let y = 0; y < target.height; y += 1) {
+              for (let x = 0; x < target.width; x += 1) interactionTiles.delete(`${target.x + x},${target.y + y}`)
+            }
+            return { ...current, objects, interactionTiles }
+          })
+        }
       })
       .catch(() => setMessage('拾ったものを記録できませんでした。'))
   }, [user, world])

@@ -171,22 +171,25 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
   if (url.pathname === '/api/world' && request.method === 'GET') {
     const today = await publishedDay(env)
     if (!today) return json({ error: 'まだ世界がありません。' }, 503)
+    const viewer = await currentUser(request, env)
 
     // Everything is pinned to the published day, so one visit never mixes two days together.
-    const [entities, tiles] = await Promise.all([
+    const [entities, tiles, picked] = await Promise.all([
       env.DB.prepare(`SELECT entity_key AS key, kind, x, y, width, height, sprite, label, message, panel, flat, blocks
         FROM world_entities WHERE born_day <= ?1 AND (gone_day IS NULL OR gone_day > ?1) ORDER BY y, x`)
         .bind(today.world_day).all<Record<string, unknown>>(),
       env.DB.prepare(`SELECT x, y, kind FROM world_tiles
         WHERE born_day <= ?1 AND (gone_day IS NULL OR gone_day > ?1)`)
         .bind(today.world_day).all<Record<string, unknown>>(),
+      viewer ? env.DB.prepare('SELECT item_key FROM player_items WHERE user_id = ?').bind(viewer.id).all<{ item_key: string }>() : Promise.resolve({ results: [] as { item_key: string }[] }),
     ])
+    const pickedKeys = new Set(picked.results.map(item => item.item_key))
 
     return json({
       worldDay: today.world_day,
       oracle: today.oracle,
       map: { width: MAP_WIDTH, height: MAP_HEIGHT },
-      entities: entities.results.map(row => ({
+      entities: entities.results.filter(row => row.kind !== 'item' || !pickedKeys.has(String(row.key))).map(row => ({
         ...row,
         flat: Boolean(row.flat),
         blocks: Boolean(row.blocks),
