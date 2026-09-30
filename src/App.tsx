@@ -192,7 +192,11 @@ function App() {
   const act = useCallback(() => {
     if (!world) return
     const vector = directionVectors[direction]
-    const target = world.interactionTiles.get(`${position.x + vector.x},${position.y + vector.y}`)
+    // Items do not block movement. Allow the same action to pick one up from
+    // the tile under the observer or from the tile they are facing.
+    const target = world.interactionTiles.get(`${position.x},${position.y}`)?.kind === 'item'
+      ? world.interactionTiles.get(`${position.x},${position.y}`)
+      : world.interactionTiles.get(`${position.x + vector.x},${position.y + vector.y}`)
     if (target?.kind === 'item') {
       pickUp(target)
       return
@@ -366,9 +370,6 @@ function App() {
                 } as CSSProperties}
                 role="img"
                 aria-label={object.label}
-                onClick={() => object.kind === 'item' && pickUp(object)}
-                onKeyDown={event => { if (object.kind === 'item' && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); pickUp(object) } }}
-                tabIndex={object.kind === 'item' ? 0 : undefined}
               ><i /><i /><i /></div>
             )
           })}
