@@ -149,7 +149,8 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
     const items = await env.DB.prepare(`SELECT player_items.item_key AS key, world_entities.label,
       player_items.quantity, player_items.first_picked_day AS firstPickedDay
       FROM player_items LEFT JOIN world_entities ON world_entities.entity_key = player_items.item_key
-      WHERE player_items.user_id = ? ORDER BY player_items.first_picked_day, player_items.item_key`).bind(user.id).all()
+      WHERE player_items.user_id = ? AND player_items.placed_at IS NULL
+      ORDER BY player_items.first_picked_day, player_items.item_key`).bind(user.id).all()
     return json({ items: items.results })
   }
 
@@ -160,6 +161,14 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
     const key = input.key?.trim() ?? ''
     const today = await publishedDay(env)
     if (!key || !today || today.world_day < 4) return json({ error: 'まだ拾えるものはありません。' }, 400)
+    if (today.world_day >= 10) {
+      const [held, recent] = await Promise.all([
+        env.DB.prepare("SELECT COALESCE(SUM(quantity), 0) AS total FROM player_items WHERE user_id = ? AND placed_at IS NULL").bind(user.id).first<{ total: number }>(),
+        env.DB.prepare('SELECT COUNT(*) AS total FROM player_item_events WHERE user_id = ? AND world_day = ?').bind(user.id, today.world_day).first<{ total: number }>(),
+      ])
+      if ((held?.total ?? 0) >= 5) return json({ error: '持てるものは5つまでです。' }, 429)
+      if ((recent?.total ?? 0) >= 5) return json({ error: '今日はもう十分に拾いました。' }, 429)
+    }
     const object = await env.DB.prepare(`SELECT entity_key FROM world_entities
       WHERE entity_key = ? AND kind = 'item' AND born_day <= ? AND (gone_day IS NULL OR gone_day > ?)`)
       .bind(key, today.world_day, today.world_day).first<{ entity_key: string }>()
@@ -167,7 +176,35 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
     const result = await env.DB.prepare(`INSERT OR IGNORE INTO player_items (user_id, item_key, quantity, first_picked_day)
       VALUES (?, ?, 1, ?)`).bind(user.id, key, today.world_day).run()
     if (!result.meta.changes) return json({ error: 'それは、もう手に持っています。' }, 409)
+    await env.DB.prepare('INSERT OR IGNORE INTO player_item_events (user_id, item_key, world_day) VALUES (?, ?, ?)').bind(user.id, key, today.world_day).run()
     return json({ ok: true, item: { key, quantity: 1, firstPickedDay: today.world_day } }, 201)
+  }
+
+  if (url.pathname === '/api/place' && request.method === 'POST') {
+    const user = await currentUser(request, env)
+    if (!user) return json({ error: '置くには検証用の記録を始めてください。' }, 401)
+    const input = await request.json<{ itemKey?: string; x?: number; y?: number }>()
+    const itemKey = input.itemKey?.trim() ?? ''
+    const x = Number(input.x)
+    const y = Number(input.y)
+    const today = await publishedDay(env)
+    if (!today || today.world_day < 6) return json({ error: 'まだ置けるものはありません。' }, 400)
+    if (!itemKey || !Number.isInteger(x) || !Number.isInteger(y) || x < 1 || x > MAP_WIDTH - 2 || y < 1 || y > MAP_HEIGHT - 2) {
+      return json({ error: 'そこには置けません。' }, 400)
+    }
+    const held = await env.DB.prepare(`SELECT player_items.item_key FROM player_items
+      WHERE user_id = ? AND item_key = ? AND placed_at IS NULL`).bind(user.id, itemKey).first()
+    if (!held) return json({ error: '手に持っているものがありません。' }, 409)
+    const blocked = await env.DB.prepare(`SELECT entity_key FROM world_entities
+      WHERE x <= ? AND x + width > ? AND y <= ? AND y + height > ?
+      AND blocks = 1 AND born_day <= ? AND (gone_day IS NULL OR gone_day > ?)`)
+      .bind(x, x, y, y, today.world_day, today.world_day).first()
+    if (blocked) return json({ error: 'そこには置けません。' }, 409)
+    await env.DB.prepare(`INSERT INTO traces (user_id, item_key, x, y, world_day, expires_at)
+      VALUES (?, ?, ?, ?, ?, datetime('now', '+30 days'))`).bind(user.id, itemKey, x, y, today.world_day).run()
+    await env.DB.prepare('UPDATE player_items SET placed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND item_key = ?')
+      .bind(user.id, itemKey).run()
+    return json({ ok: true }, 201)
   }
 
   if (url.pathname === '/api/world' && request.method === 'GET') {
@@ -176,7 +213,7 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
     const viewer = await currentUser(request, env)
 
     // Everything is pinned to the published day, so one visit never mixes two days together.
-    const [entities, tiles, picked] = await Promise.all([
+    const [entities, tiles, picked, traces] = await Promise.all([
       env.DB.prepare(`SELECT entity_key AS key, kind, x, y, width, height, sprite, label, message, panel, flat, blocks
         FROM world_entities WHERE born_day <= ?1 AND (gone_day IS NULL OR gone_day > ?1) ORDER BY y, x`)
         .bind(today.world_day).all<Record<string, unknown>>(),
@@ -184,18 +221,26 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
         WHERE born_day <= ?1 AND (gone_day IS NULL OR gone_day > ?1)`)
         .bind(today.world_day).all<Record<string, unknown>>(),
       viewer ? env.DB.prepare('SELECT item_key FROM player_items WHERE user_id = ?').bind(viewer.id).all<{ item_key: string }>() : Promise.resolve({ results: [] as { item_key: string }[] }),
+      today.world_day >= 9 ? env.DB.prepare(`SELECT traces.id, traces.item_key, traces.x, traces.y, world_entities.label, world_entities.sprite
+        FROM traces JOIN world_entities ON world_entities.entity_key = traces.item_key
+        WHERE traces.world_day <= ? AND traces.expires_at > datetime('now') ORDER BY traces.id`).bind(today.world_day).all<{ id: number; item_key: string; x: number; y: number; label: string; sprite: string }>() : Promise.resolve({ results: [] as { id: number; item_key: string; x: number; y: number; label: string; sprite: string }[] }),
     ])
     const pickedKeys = new Set(picked.results.map(item => item.item_key))
+    const traceEntities = traces.results.map(trace => ({
+      key: `trace-${trace.id}`, kind: 'trace', x: trace.x, y: trace.y, width: 1, height: 1,
+      sprite: trace.sprite, label: '誰かの置いた跡', message: `${trace.label}が、ここに置かれていました。`,
+      panel: null, flat: false, blocks: false,
+    }))
 
     return json({
       worldDay: today.world_day,
       oracle: today.oracle,
       map: { width: MAP_WIDTH, height: MAP_HEIGHT },
-      entities: entities.results.filter(row => row.kind !== 'item' || !pickedKeys.has(String(row.key))).map(row => ({
+      entities: [...entities.results.filter(row => row.kind !== 'item' || !pickedKeys.has(String(row.key))).map(row => ({
         ...row,
         flat: Boolean(row.flat),
         blocks: Boolean(row.blocks),
-      })),
+      })), ...traceEntities],
       tiles: tiles.results,
     })
   }

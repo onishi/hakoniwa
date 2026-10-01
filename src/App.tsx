@@ -200,6 +200,27 @@ function App() {
       .catch(() => setMessage('拾ったものを記録できませんでした。'))
   }, [user, world])
 
+  const placeItem = useCallback(() => {
+    if (!user || !world || world.day < 6 || inventory.length === 0) return false
+    const item = inventory[0]
+    fetch('/api/place', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ itemKey: item.key, x: position.x, y: position.y }),
+    }).then(async response => ({ response, result: await response.json() as { error?: string } }))
+      .then(({ response, result }) => {
+        if (!response.ok) {
+          setMessage(result.error ?? 'そこには置けません。')
+          return
+        }
+        setInventory(current => current.slice(1))
+        setMessage(`${item.label ?? item.key}を置きました。`)
+        fetch('/api/world').then(result => result.ok ? result.json() : null).then(data => {
+          if (data) setWorld(buildWorld(data))
+        }).catch(() => undefined)
+      }).catch(() => setMessage('置いたものを記録できませんでした。'))
+    return true
+  }, [inventory, position, user, world])
+
   const act = useCallback(() => {
     if (!world) return
     const vector = directionVectors[direction]
@@ -212,9 +233,10 @@ function App() {
       pickUp(target)
       return
     }
+    if (!target && world.day >= 6 && inventory.length > 0 && placeItem()) return
     setMessage(target?.message ?? '柔らかな土です。けれど、植えるものはまだありません。')
     if (target?.panel) setPanel(target.panel)
-  }, [direction, pickUp, position, world])
+  }, [direction, inventory, pickUp, placeItem, position, world])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

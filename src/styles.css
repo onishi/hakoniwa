@@ -283,6 +283,38 @@ button {
   box-shadow: 5px 4px 0 #4b5049;
 }
 
+.map-feather i:first-child {
+  position: absolute;
+  left: 30%;
+  top: 8%;
+  width: 32%;
+  height: 84%;
+  border-radius: 80% 12% 80% 12%;
+  background: linear-gradient(90deg, #f4e7c6 0 38%, #b5d2cf 39% 72%, #719b9c 73%);
+  transform: rotate(35deg);
+}
+
+.map-feather i:nth-child(2) {
+  position: absolute;
+  left: 18%;
+  top: 48%;
+  width: 66%;
+  height: 6%;
+  background: #6f5b48;
+  transform: rotate(35deg);
+}
+
+.map-shell i:first-child {
+  position: absolute;
+  left: 13%;
+  top: 28%;
+  width: 74%;
+  height: 48%;
+  border-radius: 50% 50% 45% 45%;
+  background: repeating-linear-gradient(90deg, #e4b77c 0 9%, #c67b53 10% 18%);
+  box-shadow: 4px 4px 0 #8d5742;
+}
+
 .map-item-label {
   position: absolute;
   left: 50%;
