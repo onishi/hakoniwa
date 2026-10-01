@@ -381,7 +381,10 @@ function App() {
                 } as CSSProperties}
                 role="img"
                 aria-label={object.label}
-              ><i /><i /><i /></div>
+              >
+                <i /><i /><i />
+                {object.kind === 'item' && <span className="map-item-label">{object.label}</span>}
+              </div>
             )
           })}
 

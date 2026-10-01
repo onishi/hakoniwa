@@ -138,6 +138,18 @@ button {
   isolation: isolate;
 }
 
+/* The rectangle is the map's full data area; the dashed diamond inside it is
+   the walkable garden boundary. Keeping both visible makes item positions
+   legible without adding a second navigation surface. */
+.pixel-map::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border: 2px solid rgb(246 237 207 / 42%);
+  pointer-events: none;
+}
+
 .garden-fence {
   position: absolute;
   inset: 0;
@@ -269,6 +281,23 @@ button {
   border-radius: 48% 52% 44% 56%;
   background: radial-gradient(circle at 35% 25%, #d6d0b8 0 12%, #9a9584 13% 45%, #67685f 72%);
   box-shadow: 5px 4px 0 #4b5049;
+}
+
+.map-item-label {
+  position: absolute;
+  left: 50%;
+  top: -18%;
+  z-index: 12;
+  padding: 3px 6px;
+  color: #f6edcf;
+  border: 2px solid #29251f;
+  background: #385342;
+  box-shadow: 2px 2px 0 rgb(8 15 10 / 35%);
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+  transform: translateX(-50%);
+  pointer-events: none;
 }
 
 .inventory-list { list-style: none; padding: 0; margin: 0; }
