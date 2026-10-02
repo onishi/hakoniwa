@@ -207,6 +207,23 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
     return json({ ok: true }, 201)
   }
 
+  if (url.pathname === '/api/reclaim-trace' && request.method === 'POST') {
+    const user = await currentUser(request, env)
+    if (!user) return json({ error: '再取得には検証用の記録を始めてください。' }, 401)
+    const input = await request.json<{ traceId?: number }>()
+    const traceId = Number(input.traceId)
+    if (!Number.isInteger(traceId)) return json({ error: 'その跡は見つかりません。' }, 400)
+    const trace = await env.DB.prepare(`SELECT traces.item_key, world_entities.label FROM traces
+      JOIN world_entities ON world_entities.entity_key = traces.item_key
+      WHERE traces.id = ? AND traces.user_id = ? AND traces.expires_at > datetime('now')`)
+      .bind(traceId, user.id).first<{ item_key: string; label: string }>()
+    if (!trace) return json({ error: 'その跡は、あなたが置いたものではありません。' }, 403)
+    await env.DB.prepare('UPDATE player_items SET placed_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND item_key = ?')
+      .bind(user.id, trace.item_key).run()
+    await env.DB.prepare('DELETE FROM traces WHERE id = ? AND user_id = ?').bind(traceId, user.id).run()
+    return json({ ok: true, item: { key: trace.item_key, label: trace.label, quantity: 1 } }, 200)
+  }
+
   if (url.pathname === '/api/world' && request.method === 'GET') {
     const today = await publishedDay(env)
     if (!today) return json({ error: 'まだ世界がありません。' }, 503)

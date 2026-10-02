@@ -221,6 +221,28 @@ function App() {
     return true
   }, [inventory, position, user, world])
 
+  const reclaimTrace = useCallback((target: WorldObject) => {
+    if (!user) {
+      setMessage('再取得には、まず検証用の記録を始めてください。')
+      return
+    }
+    const traceId = Number(target.key.replace('trace-', ''))
+    fetch('/api/reclaim-trace', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ traceId }),
+    }).then(async response => ({ response, result: await response.json() as { error?: string; item?: { key: string; label: string; quantity: number } } }))
+      .then(({ response, result }) => {
+        if (!response.ok) {
+          setMessage(result.error ?? 'その跡は再取得できません。')
+          return
+        }
+        if (result.item) setInventory(current => [...current, { ...result.item!, firstPickedDay: world?.day ?? 10 }])
+        setMessage(`${result.item?.label ?? '置いたもの'}を手に戻しました。`)
+        fetch('/api/world').then(worldResponse => worldResponse.ok ? worldResponse.json() : null).then(data => {
+          if (data) setWorld(buildWorld(data))
+        }).catch(() => undefined)
+      }).catch(() => setMessage('再取得を記録できませんでした。'))
+  }, [user, world])
+
   const act = useCallback(() => {
     if (!world) return
     const vector = directionVectors[direction]
@@ -233,10 +255,14 @@ function App() {
       pickUp(target)
       return
     }
+    if (target?.kind === 'trace') {
+      reclaimTrace(target)
+      return
+    }
     if (!target && world.day >= 6 && inventory.length > 0 && placeItem()) return
     setMessage(target?.message ?? '柔らかな土です。けれど、植えるものはまだありません。')
     if (target?.panel) setPanel(target.panel)
-  }, [direction, inventory, pickUp, placeItem, position, world])
+  }, [direction, inventory, pickUp, placeItem, position, reclaimTrace, world])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
