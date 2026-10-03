@@ -19,6 +19,7 @@ type User = { id: number; email: string; display_name: string; avatar_url: strin
 // The garden still has one size. When regions arrive this comes from the world data too.
 const MAP_WIDTH = 12
 const MAP_HEIGHT = 12
+const mapSize = (worldDay: number) => worldDay >= 28 ? { width: 16, height: 16 } : { width: MAP_WIDTH, height: MAP_HEIGHT }
 
 /** The newest day that finished its work. A day still being built stays invisible. */
 const isPreview = (env: Env) => env.APP_MODE === 'day1' || env.APP_MODE === 'evolution'
@@ -189,7 +190,8 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
     const y = Number(input.y)
     const today = await publishedDay(env)
     if (!today || today.world_day < 6) return json({ error: 'まだ置けるものはありません。' }, 400)
-    if (!itemKey || !Number.isInteger(x) || !Number.isInteger(y) || x < 1 || x > MAP_WIDTH - 2 || y < 1 || y > MAP_HEIGHT - 2) {
+    const size = mapSize(today.world_day)
+    if (!itemKey || !Number.isInteger(x) || !Number.isInteger(y) || x < 1 || x > size.width - 2 || y < 1 || y > size.height - 2) {
       return json({ error: 'そこには置けません。' }, 400)
     }
     const held = await env.DB.prepare(`SELECT player_items.item_key FROM player_items
@@ -268,6 +270,7 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
     const today = await publishedDay(env)
     if (!today) return json({ error: 'まだ世界がありません。' }, 503)
     const viewer = await currentUser(request, env)
+    const size = mapSize(today.world_day)
 
     // Everything is pinned to the published day, so one visit never mixes two days together.
     const [entities, tiles, picked, traces, gardenTiles] = await Promise.all([
@@ -293,7 +296,7 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
     return json({
       worldDay: today.world_day,
       oracle: today.oracle,
-      map: { width: MAP_WIDTH, height: MAP_HEIGHT },
+      map: size,
       entities: [...entities.results.filter(row => row.kind !== 'item' || !pickedKeys.has(String(row.key))).map(row => ({
         ...row,
         flat: Boolean(row.flat),
