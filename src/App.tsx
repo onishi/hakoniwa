@@ -69,7 +69,7 @@ type World = {
   objects: WorldObject[]
   occupiedTiles: Map<string, WorldObject>
   interactionTiles: Map<string, WorldObject>
-  groundTiles: (Position & { path: boolean })[]
+  groundTiles: (Position & { path: boolean; kind: string })[]
   fencePoints: string
   isoUnits: (gx: number, gy: number) => { ux: number; uy: number }
 }
@@ -95,10 +95,11 @@ const buildWorld = (data: WorldResponse): World => {
   }
 
   const pathTileKeys = new Set(data.tiles.filter(tile => tile.kind === 'path').map(tile => `${tile.x},${tile.y}`))
-  const groundTiles: (Position & { path: boolean })[] = []
+  const groundTiles: (Position & { path: boolean; kind: string })[] = []
+  const tileKinds = new Map(data.tiles.map(tile => [`${tile.x},${tile.y}`, tile.kind]))
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
-      groundTiles.push({ x, y, path: pathTileKeys.has(`${x},${y}`) })
+      groundTiles.push({ x, y, path: pathTileKeys.has(`${x},${y}`), kind: tileKinds.get(`${x},${y}`) ?? 'grass' })
     }
   }
 
@@ -243,6 +244,21 @@ function App() {
       }).catch(() => setMessage('再取得を記録できませんでした。'))
   }, [user, world])
 
+  const gardenAction = useCallback(() => {
+    if (!user || !world || world.day < 12) return false
+    fetch('/api/garden-action', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ x: position.x, y: position.y }),
+    }).then(async response => ({ response, result: await response.json() as { error?: string; message?: string } }))
+      .then(({ response, result }) => {
+        setMessage(response.ok ? (result.message ?? '庭に変化がありました。') : (result.error ?? '庭では何も起きませんでした。'))
+        if (response.ok) fetch('/api/world').then(worldResponse => worldResponse.ok ? worldResponse.json() : null).then(data => {
+          if (data) setWorld(buildWorld(data))
+        }).catch(() => undefined)
+      }).catch(() => setMessage('庭の状態を記録できませんでした。'))
+    return true
+  }, [position, user, world])
+
   const act = useCallback(() => {
     if (!world) return
     const vector = directionVectors[direction]
@@ -259,10 +275,11 @@ function App() {
       reclaimTrace(target)
       return
     }
+    if (!target && world.day >= 12 && gardenAction()) return
     if (!target && world.day >= 6 && inventory.length > 0 && placeItem()) return
     setMessage(target?.message ?? '柔らかな土です。けれど、植えるものはまだありません。')
     if (target?.panel) setPanel(target.panel)
-  }, [direction, inventory, pickUp, placeItem, position, reclaimTrace, world])
+  }, [direction, gardenAction, inventory, pickUp, placeItem, position, reclaimTrace, world])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -401,7 +418,7 @@ function App() {
             return (
               <div
                 key={`tile-${tile.x}-${tile.y}`}
-                className={`iso-tile ${tile.path ? 'path-tile' : shade}`}
+                className={`iso-tile ${tile.kind !== 'path' && tile.kind !== 'grass' ? `${tile.kind}-tile` : tile.path ? 'path-tile' : shade}`}
                 style={{ '--ux': ux, '--uy': uy } as CSSProperties}
               />
             )

@@ -224,13 +224,53 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
     return json({ ok: true, item: { key: trace.item_key, label: trace.label, quantity: 1 } }, 200)
   }
 
+  if (url.pathname === '/api/garden-action' && request.method === 'POST') {
+    const user = await currentUser(request, env)
+    if (!user) return json({ error: '庭を育てるには検証用の記録を始めてください。' }, 401)
+    const input = await request.json<{ x?: number; y?: number }>()
+    const x = Number(input.x)
+    const y = Number(input.y)
+    const today = await publishedDay(env)
+    if (!today || today.world_day < 12 || !Number.isInteger(x) || !Number.isInteger(y)) return json({ error: 'まだ庭を育てられません。' }, 400)
+    const tile = await env.DB.prepare('SELECT status, seed_key FROM player_garden_tiles WHERE user_id = ? AND x = ? AND y = ?')
+      .bind(user.id, x, y).first<{ status: string; seed_key: string | null }>()
+    if (!tile) {
+      await env.DB.prepare(`INSERT INTO player_garden_tiles (user_id, x, y, status) VALUES (?, ?, ?, 'tilled')`).bind(user.id, x, y).run()
+      return json({ ok: true, state: 'tilled', message: '土を耕しました。' })
+    }
+    if (tile.status === 'tilled') {
+      const seed = await env.DB.prepare(`SELECT item_key FROM player_items WHERE user_id = ? AND placed_at IS NULL AND item_key = 'item-seed'`)
+        .bind(user.id).first<{ item_key: string }>()
+      if (!seed) return json({ error: '植える種を持っていません。' }, 409)
+      await env.DB.prepare(`UPDATE player_items SET placed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND item_key = 'item-seed'`).bind(user.id).run()
+      await env.DB.prepare(`UPDATE player_garden_tiles SET status = 'planted', seed_key = 'item-seed', planted_day = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND x = ? AND y = ?`)
+        .bind(today.world_day, user.id, x, y).run()
+      return json({ ok: true, state: 'planted', message: '種を植えました。' })
+    }
+    if (tile.status === 'planted' && today.world_day >= 16) {
+      await env.DB.prepare(`UPDATE player_garden_tiles SET status = 'watered', last_watered_day = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND x = ? AND y = ?`)
+        .bind(today.world_day, user.id, x, y).run()
+      return json({ ok: true, state: 'watered', message: '水をやりました。' })
+    }
+    if (tile.status === 'watered' && today.world_day >= 18) {
+      await env.DB.prepare(`UPDATE player_garden_tiles SET status = 'tilled', seed_key = NULL, planted_day = NULL, last_watered_day = NULL, updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND x = ? AND y = ?`)
+        .bind(user.id, x, y).run()
+      await env.DB.prepare(`INSERT INTO player_items (user_id, item_key, quantity, first_picked_day, placed_at)
+        VALUES (?, 'item-sprout', 1, ?, NULL)
+        ON CONFLICT(user_id, item_key) DO UPDATE SET quantity = quantity + 1, placed_at = NULL, updated_at = CURRENT_TIMESTAMP`)
+        .bind(user.id, today.world_day).run()
+      return json({ ok: true, state: 'harvested', message: '芽を採りました。' })
+    }
+    return json({ error: 'もう少し時間が必要です。' }, 409)
+  }
+
   if (url.pathname === '/api/world' && request.method === 'GET') {
     const today = await publishedDay(env)
     if (!today) return json({ error: 'まだ世界がありません。' }, 503)
     const viewer = await currentUser(request, env)
 
     // Everything is pinned to the published day, so one visit never mixes two days together.
-    const [entities, tiles, picked, traces] = await Promise.all([
+    const [entities, tiles, picked, traces, gardenTiles] = await Promise.all([
       env.DB.prepare(`SELECT entity_key AS key, kind, x, y, width, height, sprite, label, message, panel, flat, blocks
         FROM world_entities WHERE born_day <= ?1 AND (gone_day IS NULL OR gone_day > ?1) ORDER BY y, x`)
         .bind(today.world_day).all<Record<string, unknown>>(),
@@ -241,6 +281,7 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
       today.world_day >= 9 ? env.DB.prepare(`SELECT traces.id, traces.item_key, traces.x, traces.y, world_entities.label, world_entities.sprite
         FROM traces JOIN world_entities ON world_entities.entity_key = traces.item_key
         WHERE traces.world_day <= ? AND traces.expires_at > datetime('now') ORDER BY traces.id`).bind(today.world_day).all<{ id: number; item_key: string; x: number; y: number; label: string; sprite: string }>() : Promise.resolve({ results: [] as { id: number; item_key: string; x: number; y: number; label: string; sprite: string }[] }),
+      viewer ? env.DB.prepare('SELECT x, y, status AS kind FROM player_garden_tiles WHERE user_id = ?').bind(viewer.id).all<Record<string, unknown>>() : Promise.resolve({ results: [] as Record<string, unknown>[] }),
     ])
     const pickedKeys = new Set(picked.results.map(item => item.item_key))
     const traceEntities = traces.results.map(trace => ({
@@ -258,7 +299,7 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
         flat: Boolean(row.flat),
         blocks: Boolean(row.blocks),
       })), ...traceEntities],
-      tiles: tiles.results,
+      tiles: [...tiles.results, ...gardenTiles.results],
     })
   }
 

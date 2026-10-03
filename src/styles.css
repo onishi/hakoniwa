@@ -182,6 +182,9 @@ button {
 .tile-light { background: #86b568; }
 .tile-dark { background: #79a45a; }
 .path-tile { background: #c8a96c; }
+.tilled-tile { background: repeating-linear-gradient(135deg, #8a5c3d 0 5px, #a8754d 6px 10px); }
+.planted-tile { background: radial-gradient(circle at 50% 45%, #6f9f4f 0 16%, #8f7047 17% 100%); }
+.watered-tile { background: radial-gradient(circle at 50% 45%, #73a7a0 0 22%, #6d8055 23% 100%); }
 
 .map-object,
 .player {
@@ -314,6 +317,25 @@ button {
   background: repeating-linear-gradient(90deg, #e4b77c 0 9%, #c67b53 10% 18%);
   box-shadow: 4px 4px 0 #8d5742;
 }
+
+.map-seed i:first-child {
+  position: absolute;
+  left: 31%; top: 34%; width: 38%; height: 42%;
+  border-radius: 70% 35% 70% 35%;
+  background: #d7b45d;
+  transform: rotate(38deg);
+}
+
+.map-flower i:first-child,
+.map-flower i:nth-child(2) {
+  position: absolute;
+  left: 38%; top: 26%; width: 24%; height: 48%;
+  border-radius: 50%;
+  background: #f4e7cf;
+}
+
+.map-flower i:nth-child(2) { transform: rotate(90deg); }
+.map-flower i:nth-child(3) { position: absolute; left: 43%; top: 42%; width: 14%; height: 14%; border-radius: 50%; background: #e5b557; }
 
 .map-item-label {
   position: absolute;
