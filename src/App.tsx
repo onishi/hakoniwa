@@ -266,6 +266,15 @@ function App() {
       .catch(() => setMessage('道具の操作を記録できませんでした。'))
   }, [])
 
+  const harvestSource = useCallback((target: WorldObject) => {
+    fetch('/api/source-action', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key: target.key }) })
+      .then(async response => ({ response, result: await response.json() as { error?: string; message?: string } }))
+      .then(({ response, result }) => {
+        setMessage(response.ok ? (result.message ?? '実りを採りました。') : (result.error ?? 'そこからは採れません。'))
+        if (response.ok) fetch('/api/inventory').then(inventoryResponse => inventoryResponse.ok ? inventoryResponse.json() : null).then(data => data?.items && setInventory(data.items)).catch(() => undefined)
+      }).catch(() => setMessage('採取を記録できませんでした。'))
+  }, [])
+
   const craft = useCallback(() => {
     fetch('/api/craft', { method: 'POST' })
       .then(async response => ({ response, result: await response.json() as { error?: string; message?: string } }))
@@ -295,6 +304,10 @@ function App() {
       performTool(target)
       return
     }
+    if (target?.kind === 'source') {
+      harvestSource(target)
+      return
+    }
     if (target?.key === 'house' && world.day >= 35) {
       craft()
       return
@@ -303,7 +316,7 @@ function App() {
     if (!target && world.day >= 6 && inventory.length > 0 && placeItem()) return
     setMessage(target?.message ?? '柔らかな土です。けれど、植えるものはまだありません。')
     if (target?.panel) setPanel(target.panel)
-  }, [craft, direction, gardenAction, inventory, performTool, pickUp, placeItem, position, reclaimTrace, world])
+  }, [craft, direction, gardenAction, harvestSource, inventory, performTool, pickUp, placeItem, position, reclaimTrace, world])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

@@ -241,12 +241,12 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
       return json({ ok: true, state: 'tilled', message: '土を耕しました。' })
     }
     if (tile.status === 'tilled') {
-      const seed = await env.DB.prepare(`SELECT item_key FROM player_items WHERE user_id = ? AND placed_at IS NULL AND item_key = 'item-seed'`)
+      const seed = await env.DB.prepare(`SELECT item_key FROM player_items WHERE user_id = ? AND placed_at IS NULL AND item_key IN ('item-seed', 'item-berry') ORDER BY CASE item_key WHEN 'item-seed' THEN 0 ELSE 1 END LIMIT 1`)
         .bind(user.id).first<{ item_key: string }>()
       if (!seed) return json({ error: '植える種を持っていません。' }, 409)
-      await env.DB.prepare(`UPDATE player_items SET placed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND item_key = 'item-seed'`).bind(user.id).run()
-      await env.DB.prepare(`UPDATE player_garden_tiles SET status = 'planted', seed_key = 'item-seed', planted_day = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND x = ? AND y = ?`)
-        .bind(today.world_day, user.id, x, y).run()
+      await env.DB.prepare(`UPDATE player_items SET placed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND item_key = ?`).bind(user.id, seed.item_key).run()
+      await env.DB.prepare(`UPDATE player_garden_tiles SET status = 'planted', seed_key = ?, planted_day = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND x = ? AND y = ?`)
+        .bind(seed.item_key, today.world_day, user.id, x, y).run()
       return json({ ok: true, state: 'planted', message: '種を植えました。' })
     }
     if (tile.status === 'planted' && today.world_day >= 16) {
@@ -283,6 +283,23 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
       VALUES (?, ?, 1, ?, NULL) ON CONFLICT(user_id, item_key) DO UPDATE SET quantity = quantity + 1, placed_at = NULL, updated_at = CURRENT_TIMESTAMP`)
       .bind(user.id, outputKey, today.world_day).run()
     return json({ ok: true, message: `${target.label}から素材を取り出しました。` })
+  }
+
+  if (url.pathname === '/api/source-action' && request.method === 'POST') {
+    const user = await currentUser(request, env)
+    if (!user) return json({ error: '採るには検証用の記録を始めてください。' }, 401)
+    const input = await request.json<{ key?: string }>()
+    const today = await publishedDay(env)
+    if (!today || today.world_day < 20) return json({ error: 'まだ実るものはありません。' }, 400)
+    const source = await env.DB.prepare(`SELECT entity_key, label FROM world_entities
+      WHERE entity_key = ? AND kind = 'source' AND born_day <= ? AND (gone_day IS NULL OR gone_day > ?)`)
+      .bind(input.key ?? '', today.world_day, today.world_day).first<{ entity_key: string; label: string }>()
+    if (!source) return json({ error: 'そこからは採れません。' }, 404)
+    const outputKey = source.entity_key === 'source-fruit-tree' ? 'item-berry' : 'item-sprout'
+    await env.DB.prepare(`INSERT INTO player_items (user_id, item_key, quantity, first_picked_day, placed_at)
+      VALUES (?, ?, 1, ?, NULL) ON CONFLICT(user_id, item_key) DO UPDATE SET quantity = quantity + 1, placed_at = NULL, updated_at = CURRENT_TIMESTAMP`)
+      .bind(user.id, outputKey, today.world_day).run()
+    return json({ ok: true, message: `${source.label}から実りを採りました。` })
   }
 
   if (url.pathname === '/api/craft' && request.method === 'POST') {

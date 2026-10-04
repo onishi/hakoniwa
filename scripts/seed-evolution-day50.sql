@@ -28,6 +28,9 @@ INSERT OR IGNORE INTO creation_events (world_day, kind, payload) VALUES (49, 'or
 INSERT OR IGNORE INTO world_days (world_day, oracle, status) VALUES (50, '五十日の庭に、いくつもの形が息づいています。', 'published');
 INSERT OR IGNORE INTO genesis_diary (world_day, god, body) VALUES (50, 'CLAUDE', '五十日の庭に、いくつもの形が息づいています。');
 INSERT OR IGNORE INTO creation_events (world_day, kind, payload) VALUES (50, 'oracle', '{"body":"五十日の庭に、いくつもの形が息づいています。"}');
+UPDATE world_entities SET gone_day = 20 WHERE entity_key = 'item-berry' AND gone_day IS NULL;
+INSERT OR IGNORE INTO world_entities (entity_key, kind, x, y, width, height, sprite, label, message, panel, flat, blocks, born_day)
+VALUES ('source-fruit-tree', 'source', 4, 3, 1, 1, 'map-tree', '実のなる果樹', '季節ごとに実をつける果樹です。実りを採れそうです。', NULL, 0, 1, 20);
 
 INSERT OR IGNORE INTO world_tiles (x, y, kind, born_day) VALUES
  (15,6,'path',48),(16,6,'path',48),(15,7,'path',48),(16,7,'path',48),(15,8,'path',48),(16,8,'path',48),
