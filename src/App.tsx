@@ -259,6 +259,22 @@ function App() {
     return true
   }, [position, user, world])
 
+  const performTool = useCallback((target: WorldObject) => {
+    fetch('/api/tool-action', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key: target.key }) })
+      .then(async response => ({ response, result: await response.json() as { error?: string; message?: string } }))
+      .then(({ response, result }) => setMessage(response.ok ? (result.message ?? '素材を取り出しました。') : (result.error ?? '道具を使えません。')))
+      .catch(() => setMessage('道具の操作を記録できませんでした。'))
+  }, [])
+
+  const craft = useCallback(() => {
+    fetch('/api/craft', { method: 'POST' })
+      .then(async response => ({ response, result: await response.json() as { error?: string; message?: string } }))
+      .then(({ response, result }) => {
+        setMessage(response.ok ? (result.message ?? '何かを作りました。') : (result.error ?? 'まだ作れません。'))
+        if (response.ok) fetch('/api/inventory').then(inventoryResponse => inventoryResponse.ok ? inventoryResponse.json() : null).then(data => data?.items && setInventory(data.items)).catch(() => undefined)
+      }).catch(() => setMessage('作ったものを記録できませんでした。'))
+  }, [])
+
   const act = useCallback(() => {
     if (!world) return
     const vector = directionVectors[direction]
@@ -275,11 +291,19 @@ function App() {
       reclaimTrace(target)
       return
     }
+    if (target?.kind === 'resource') {
+      performTool(target)
+      return
+    }
+    if (target?.key === 'house' && world.day >= 35) {
+      craft()
+      return
+    }
     if (!target && world.day >= 12 && gardenAction()) return
     if (!target && world.day >= 6 && inventory.length > 0 && placeItem()) return
     setMessage(target?.message ?? '柔らかな土です。けれど、植えるものはまだありません。')
     if (target?.panel) setPanel(target.panel)
-  }, [direction, gardenAction, inventory, pickUp, placeItem, position, reclaimTrace, world])
+  }, [craft, direction, gardenAction, inventory, performTool, pickUp, placeItem, position, reclaimTrace, world])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
