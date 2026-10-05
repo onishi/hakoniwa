@@ -23,8 +23,10 @@
 | DAY 50まで旧区画・隣区画の履歴が維持される | 合格 |
 | 実際に隣区画を歩いて新種を拾い、道具・クラフトへつなげる | 要調整。ブラウザでの手動確認を継続 |
 
-再現用の投入SQLは [`scripts/seed-evolution-day50.sql`](../../scripts/seed-evolution-day50.sql) に置いた。本番とDAY 1固定版の世界日はDAY 1のまま維持する。
+再現用の投入SQLは [`scripts/seed-evolution-day50.sql`](../../scripts/seed-evolution-day50.sql) と [`scripts/rebuild-evolution-day50-sources.sql`](../../scripts/rebuild-evolution-day50-sources.sql) に置いた。本番とDAY 1固定版の世界日はDAY 1のまま維持する。
 
 ## 設計見直し
 
 地面に落ちているだけで使い道のない種類を増やさないため、DAY 20以降の果物は `source-fruit-tree` から採る経路へ変更した。果物は庭へ植える、置く、材料にする、のいずれかへ進められる。今後追加する素材も、投入前に入手元と使い道を検証記録へ書く。
+
+DAY 50の再構成では、地面に落ちているだけの採集物を果樹、道具小屋、苗床、区画固有の採取場へ置き換えた。10分の訪問で「対象へ行く→採る→使う」が成立する状態を基準にする。

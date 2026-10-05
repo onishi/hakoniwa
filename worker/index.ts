@@ -295,7 +295,24 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
       WHERE entity_key = ? AND kind = 'source' AND born_day <= ? AND (gone_day IS NULL OR gone_day > ?)`)
       .bind(input.key ?? '', today.world_day, today.world_day).first<{ entity_key: string; label: string }>()
     if (!source) return json({ error: 'そこからは採れません。' }, 404)
-    const outputKey = source.entity_key === 'source-fruit-tree' ? 'item-berry' : 'item-sprout'
+    const sourceOutputs: Record<string, string> = {
+      'source-fruit-tree': 'item-berry',
+      'source-tool-shed': 'item-tool',
+      'source-reed-bed': 'item-reed',
+      'source-clay-pit': 'item-clay',
+      'source-wildflower': 'item-wildflower',
+      'source-sandbank': 'item-sand',
+      'source-conifer': 'item-cone',
+      'source-root-bed': 'item-root',
+      'source-bark-tree': 'item-bark',
+      'source-seedling': 'item-seedling',
+      'source-lichen-rock': 'item-lichen',
+      'source-lateberry': 'item-lateberry',
+      'source-mirror-stone': 'item-mirrorpebble',
+      'source-windplant': 'item-windseed',
+      'source-seed-pod': 'item-seed',
+    }
+    const outputKey = sourceOutputs[source.entity_key] ?? 'item-sprout'
     await env.DB.prepare(`INSERT INTO player_items (user_id, item_key, quantity, first_picked_day, placed_at)
       VALUES (?, ?, 1, ?, NULL) ON CONFLICT(user_id, item_key) DO UPDATE SET quantity = quantity + 1, placed_at = NULL, updated_at = CURRENT_TIMESTAMP`)
       .bind(user.id, outputKey, today.world_day).run()
