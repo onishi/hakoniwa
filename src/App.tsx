@@ -156,6 +156,7 @@ function App() {
   const [world, setWorld] = useState<World | null>(null)
   const [inventory, setInventory] = useState<{ key: string; label?: string; quantity: number; firstPickedDay: number }[]>([])
   const [inventoryStatus, setInventoryStatus] = useState('')
+  const [fishingState, setFishingState] = useState<'idle' | 'cast' | 'caught'>('idle')
   /** The world came from the cache, so nothing this visit does is written back. */
   const [offline, setOffline] = useState(false)
   const saveTimer = useRef<number | undefined>(undefined)
@@ -284,6 +285,23 @@ function App() {
       }).catch(() => setMessage('作ったものを記録できませんでした。'))
   }, [])
 
+  const fishingAction = useCallback((target: 'rod' | 'pond') => {
+    if (!user) {
+      setMessage('釣りには、まず検証用の記録を始めてください。')
+      return
+    }
+    fetch('/api/fishing', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ target, x: position.x, y: position.y }),
+    }).then(async response => ({ response, result: await response.json() as { error?: string; message?: string; state?: 'idle' | 'cast' | 'caught' } }))
+      .then(({ response, result }) => {
+        setMessage(response.ok ? (result.message ?? '水面に変化がありました。') : (result.error ?? '釣りを続けられません。'))
+        if (response.ok && result.state) setFishingState(result.state)
+      })
+      .catch(() => setMessage('釣りの状態を記録できませんでした。'))
+  }, [position, user])
+
   const act = useCallback(() => {
     if (!world) return
     const vector = directionVectors[direction]
@@ -308,15 +326,25 @@ function App() {
       harvestSource(target)
       return
     }
+    if (target?.key === 'fishing-rod') {
+      fishingAction('rod')
+      return
+    }
+    if (target?.key === 'pond' && world.day >= 8) {
+      fishingAction('pond')
+      return
+    }
     if (target?.key === 'house' && world.day >= 35) {
       craft()
       return
     }
     if (!target && world.day >= 12 && gardenAction()) return
     if (!target && world.day >= 6 && inventory.length > 0 && placeItem()) return
-    setMessage(target?.message ?? '柔らかな土です。けれど、植えるものはまだありません。')
+    setMessage(target?.key === 'pond' && world.day >= 3
+      ? '池の中を小さな魚影が泳いでいます。'
+      : target?.message ?? '柔らかな土です。けれど、植えるものはまだありません。')
     if (target?.panel) setPanel(target.panel)
-  }, [craft, direction, gardenAction, harvestSource, inventory, performTool, pickUp, placeItem, position, reclaimTrace, world])
+  }, [craft, direction, fishingAction, gardenAction, harvestSource, inventory, performTool, pickUp, placeItem, position, reclaimTrace, world])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -406,6 +434,13 @@ function App() {
   }, [user, world])
 
   useEffect(() => {
+    if (!user || !world || world.day < 8 || offline) return
+    fetch('/api/fishing').then(response => response.ok ? response.json() : null).then(result => {
+      if (result?.state) setFishingState(result.state)
+    }).catch(() => undefined)
+  }, [user, world, offline])
+
+  useEffect(() => {
     if (!user || !ready || offline) return
     window.clearTimeout(saveTimer.current)
     saveTimer.current = window.setTimeout(() => {
@@ -473,7 +508,7 @@ function App() {
             return (
               <div
                 key={object.key}
-                className={`map-object ${object.sprite} ${object.flat ? 'is-flat' : ''}`}
+                className={`map-object ${object.sprite} ${object.flat ? 'is-flat' : ''} ${object.key === 'pond' && world.day >= 2 ? 'pond-awake' : ''} ${object.key === 'pond' && world.day >= 3 ? 'pond-fish' : ''} ${object.key === 'pond' && fishingState === 'cast' ? 'pond-cast' : ''} ${object.key === 'pond' && fishingState === 'caught' ? 'pond-caught' : ''}`}
                 style={{
                   '--ux': ux,
                   '--uy': uy,
@@ -482,9 +517,10 @@ function App() {
                   zIndex: object.flat ? 3 : Math.round(uy * 100),
                 } as CSSProperties}
                 role="img"
-                aria-label={object.label}
+                aria-label={object.key === 'pond' && world.day >= 3 ? '魚影の泳ぐ池' : object.label}
               >
                 <i /><i /><i />
+                {object.key === 'pond' && <span className="fishing-float" aria-hidden="true" />}
                 {object.kind === 'item' && <span className="map-item-label">{object.label}</span>}
               </div>
             )
