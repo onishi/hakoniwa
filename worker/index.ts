@@ -155,6 +155,75 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
     return json({ items: items.results })
   }
 
+  if (url.pathname === '/api/fishing' && request.method === 'GET') {
+    const user = await currentUser(request, env)
+    if (!user) return json({ error: '記録を始めてください。' }, 401)
+    const today = await publishedDay(env)
+    if (!today || today.world_day < 8) return json({ state: 'idle', rodBorrowed: false })
+    const fishing = await env.DB.prepare('SELECT rod_borrowed, state, world_day FROM player_fishing WHERE user_id = ?')
+      .bind(user.id).first<{ rod_borrowed: number; state: string; world_day: number }>()
+    return json({
+      state: fishing?.world_day === today.world_day ? fishing.state : 'idle',
+      rodBorrowed: Boolean(fishing?.rod_borrowed),
+    })
+  }
+
+  if (url.pathname === '/api/fishing' && request.method === 'POST') {
+    if (request.headers.get('origin') !== url.origin) return json({ error: 'このページから操作してください。' }, 403)
+    const user = await currentUser(request, env)
+    if (!user) return json({ error: '釣りには、まず記録を始めてください。' }, 401)
+    const today = await publishedDay(env)
+    if (!today || today.world_day < 7) return json({ error: 'まだ釣り竿はありません。' }, 409)
+    const input = await request.json<{ target?: string; x?: number; y?: number }>()
+    const x = Number(input.x)
+    const y = Number(input.y)
+    const size = mapSize(today.world_day)
+    if (!Number.isInteger(x) || !Number.isInteger(y) || x < 1 || y < 1 || x >= size.width - 1 || y >= size.height - 1) {
+      return json({ error: 'そこからは届きません。' }, 400)
+    }
+    const key = input.target === 'rod' ? 'fishing-rod' : input.target === 'pond' ? 'pond' : null
+    if (!key) return json({ error: '釣る場所を選んでください。' }, 400)
+    const target = await env.DB.prepare(`SELECT x, y, width, height FROM world_entities
+      WHERE entity_key = ? AND born_day <= ? AND (gone_day IS NULL OR gone_day > ?)`)
+      .bind(key, today.world_day, today.world_day).first<{ x: number; y: number; width: number; height: number }>()
+    if (!target) return json({ error: 'そこにはまだ何もありません。' }, 404)
+    const dx = Math.max(target.x - x, 0, x - target.x - target.width + 1)
+    const dy = Math.max(target.y - y, 0, y - target.y - target.height + 1)
+    if (dx + dy > 1) return json({ error: 'もう少し近づいてください。' }, 409)
+
+    await env.DB.prepare(`INSERT OR IGNORE INTO player_fishing (user_id, world_day) VALUES (?, ?)`)
+      .bind(user.id, today.world_day).run()
+    await env.DB.prepare(`UPDATE player_fishing SET state = 'idle', world_day = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE user_id = ? AND world_day < ?`).bind(today.world_day, user.id, today.world_day).run()
+    if (key === 'fishing-rod') {
+      await env.DB.prepare(`UPDATE player_fishing SET rod_borrowed = 1, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?`)
+        .bind(user.id).run()
+      return json({ state: 'idle', message: '釣り竿を借りました。魚影のある池へ向けてアクションしてください。' })
+    }
+    if (today.world_day < 8) return json({ error: '魚影をもう少し観察してください。' }, 409)
+    const fishing = await env.DB.prepare('SELECT rod_borrowed, state FROM player_fishing WHERE user_id = ?')
+      .bind(user.id).first<{ rod_borrowed: number; state: 'idle' | 'cast' | 'caught' }>()
+    if (!fishing?.rod_borrowed) return json({ error: '池のそばで竿を借りてください。' }, 409)
+    if (fishing.state === 'idle') {
+      const changed = await env.DB.prepare(`UPDATE player_fishing SET state = 'cast', updated_at = CURRENT_TIMESTAMP
+        WHERE user_id = ? AND state = 'idle' RETURNING state`).bind(user.id).first()
+      if (!changed) return json({ error: 'もう一度、池を見てください。' }, 409)
+      return json({ state: 'cast', message: '浮きが揺れました。もう一度アクションすると釣れそうです。' })
+    }
+    if (fishing.state === 'cast') {
+      if (today.world_day < 10) return json({ state: 'cast', message: '魚影が近づいています。もう少し待ちましょう。' })
+      const changed = await env.DB.prepare(`UPDATE player_fishing SET state = 'caught', updated_at = CURRENT_TIMESTAMP
+        WHERE user_id = ? AND state = 'cast' RETURNING state`).bind(user.id).first()
+      if (!changed) return json({ error: 'もう一度、池を見てください。' }, 409)
+      return json({ state: 'caught', message: '小さな魚が釣れました。池へ向けてもう一度アクションすると戻せます。' })
+    }
+    const changed = await env.DB.prepare(`UPDATE player_fishing SET state = 'idle', released_count = released_count + 1,
+      updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND state = 'caught' RETURNING released_count`)
+      .bind(user.id).first<{ released_count: number }>()
+    if (!changed) return json({ error: 'もう一度、池を見てください。' }, 409)
+    return json({ state: 'idle', releasedCount: changed.released_count, message: '魚を池へ戻しました。魚影がゆっくり泳ぎ去ります。' })
+  }
+
   if (url.pathname === '/api/pickup' && request.method === 'POST') {
     const user = await currentUser(request, env)
     if (!user) return json({ error: '拾うには検証用の記録を始めてください。' }, 401)

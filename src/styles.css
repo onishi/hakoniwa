@@ -475,6 +475,122 @@ button {
     linear-gradient(200deg, #6fb2bb 0 34%, #4a8e9c 35% 72%, #356e7e 73%);
 }
 
+.map-pond i { z-index: 1; }
+
+.map-pond.pond-awake i:first-child {
+  left: 46%;
+  top: 43%;
+  width: 13%;
+  height: 12%;
+  border: 2px solid rgb(232 247 223 / 75%);
+  border-radius: 50%;
+  animation: pond-ripple 3.8s ease-out infinite;
+}
+
+.map-pond.pond-fish i:nth-child(2) {
+  left: 42%;
+  top: 49%;
+  width: 16%;
+  height: 8%;
+  border-radius: 60% 45% 45% 60%;
+  background: #315d69;
+  box-shadow: 0 2px 0 rgb(22 59 65 / 35%);
+  animation: fish-swim 4.6s ease-in-out infinite alternate;
+}
+
+.map-pond.pond-fish i:nth-child(3) {
+  left: 39%;
+  top: 49%;
+  width: 6%;
+  height: 8%;
+  clip-path: polygon(100% 50%, 0 0, 0 100%);
+  background: #315d69;
+  animation: fish-swim 4.6s ease-in-out infinite alternate;
+}
+
+.map-pond .fishing-float {
+  display: none;
+  position: absolute;
+  left: 61%;
+  top: 39%;
+  z-index: 1;
+  width: 7%;
+  height: 12%;
+  border: 2px solid #f3e5c6;
+  border-radius: 50%;
+  background: #c6674b;
+  box-shadow: 0 2px 0 #315d69;
+}
+
+.map-pond.pond-cast .fishing-float { display: block; }
+.map-pond.pond-caught i:nth-child(2),
+.map-pond.pond-caught i:nth-child(3) { opacity: .3; }
+
+.map-shore-creature i:first-child {
+  left: 27%;
+  top: 62%;
+  width: 44%;
+  height: 20%;
+  border-radius: 65% 50% 45% 50%;
+  background: #a3704b;
+  box-shadow: 0 4px 0 rgb(45 42 31 / 25%);
+  animation: shore-walk 5s ease-in-out infinite alternate;
+}
+
+.map-shore-creature i:nth-child(2) {
+  left: 56%;
+  top: 58%;
+  width: 19%;
+  height: 18%;
+  border-radius: 55% 55% 45% 45%;
+  background: #ba8b58;
+  animation: shore-walk 5s ease-in-out infinite alternate;
+}
+
+.map-shore-creature i:nth-child(3) {
+  left: 65%;
+  top: 63%;
+  width: 3%;
+  height: 3%;
+  border-radius: 50%;
+  background: #29251f;
+  animation: shore-walk 5s ease-in-out infinite alternate;
+}
+
+.map-fishing-rod i:first-child {
+  left: 34%;
+  top: 28%;
+  width: 5%;
+  height: 51%;
+  border-radius: 3px;
+  background: #805b39;
+  transform: rotate(34deg);
+  box-shadow: 3px 1px 0 #d3b275;
+}
+
+.map-fishing-rod i:nth-child(2) {
+  left: 51%;
+  top: 42%;
+  width: 1%;
+  height: 32%;
+  background: rgb(236 234 209 / 80%);
+}
+
+@keyframes pond-ripple {
+  from { opacity: .8; transform: scale(.4); }
+  to { opacity: 0; transform: scale(2.5); }
+}
+
+@keyframes fish-swim {
+  0%, 18% { transform: translate(-14%, 5%); }
+  72%, 100% { transform: translate(45%, -18%); }
+}
+
+@keyframes shore-walk {
+  0%, 22% { transform: translateX(-12%); }
+  78%, 100% { transform: translateX(18%); }
+}
+
 /* The step is not animated. A transition on anything the position is built from —
    the transform itself, or the custom properties it reads — pins the painted
    position to its first value, and the player stops moving on screen while the
@@ -637,4 +753,8 @@ button:focus-visible { outline: 4px solid #fff2a8; outline-offset: 3px; }
 
 @media (prefers-reduced-motion: reduce) {
   .player { transition: none; }
+  .map-pond i, .map-shore-creature i { animation: none !important; }
 }
+
+.capture-mode .map-pond i,
+.capture-mode .map-shore-creature i { animation: none !important; }
