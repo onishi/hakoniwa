@@ -185,6 +185,16 @@ button {
 .tilled-tile { background: repeating-linear-gradient(135deg, #8a5c3d 0 5px, #a8754d 6px 10px); }
 .planted-tile { background: radial-gradient(circle at 50% 45%, #6f9f4f 0 16%, #8f7047 17% 100%); }
 .watered-tile { background: radial-gradient(circle at 50% 45%, #73a7a0 0 22%, #6d8055 23% 100%); }
+.grown-tile { background: radial-gradient(circle at 50% 45%, #d2bd6a 0 22%, #6b9e50 23% 44%, #8f7047 45% 100%); }
+.planted-tile::after, .watered-tile::after, .grown-tile::after {
+  content: '';
+  position: absolute;
+  inset: 22% 31%;
+  background: #3f793e;
+  clip-path: polygon(50% 20%, 70% 0, 100% 14%, 80% 48%, 58% 55%, 54% 100%, 46% 100%, 43% 55%, 20% 48%, 0 15%, 30% 0);
+}
+.watered-tile::after { background: #5ca84c; transform: scale(1.18); }
+.grown-tile::after { background: #e0c35c; transform: scale(1.35); }
 
 .map-object,
 .player {
@@ -375,6 +385,14 @@ button {
   height: 56%;
   border-radius: 50%;
   background: radial-gradient(circle at 64% 28%, #5da75a 0 40%, #46853f 41% 71%, #356733 72%);
+}
+
+.map-fruit-tree::after {
+  background:
+    radial-gradient(circle at 28% 54%, #e7834d 0 7%, transparent 8%),
+    radial-gradient(circle at 65% 64%, #dc6846 0 8%, transparent 9%),
+    radial-gradient(circle at 72% 33%, #e9a14c 0 7%, transparent 8%),
+    radial-gradient(circle at 64% 28%, #5da75a 0 40%, #46853f 41% 71%, #356733 72%);
 }
 
 /* Notice board: posts stand on the tile centre line and the panel runs along the
