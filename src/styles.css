@@ -438,6 +438,49 @@ button {
   border: 2px solid #72563a;
 }
 
+.map-workbench i:first-child {
+  clip-path: polygon(10% 48%, 54% 27%, 94% 48%, 50% 70%);
+  background: #b78450;
+  filter: drop-shadow(0 3px 0 #684a31);
+}
+.map-workbench i:nth-child(2) {
+  clip-path: polygon(16% 55%, 24% 59%, 24% 84%, 16% 80%, 76% 52%, 84% 49%, 84% 78%, 76% 82%);
+  background: #71492e;
+}
+.map-workbench i:nth-child(3) {
+  inset: auto;
+  left: 42%; top: 24%; width: 17%; height: 24%;
+  border-radius: 30% 30% 10% 10%;
+  background: #777d75;
+  box-shadow: 8px 7px 0 -3px #4f5650;
+}
+
+.map-lantern::before {
+  content: '';
+  position: absolute;
+  left: 14%; top: 14%; width: 72%; height: 72%;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgb(250 209 121 / 45%), transparent 70%);
+  animation: lantern-glow 3s ease-in-out infinite alternate;
+}
+.map-lantern i:first-child {
+  inset: auto;
+  left: 37%; top: 46%; width: 26%; height: 31%;
+  border: 4px solid #6c5540;
+  border-radius: 15%;
+  background: #efc979;
+  box-shadow: 0 3px 0 #473a2d;
+}
+.map-lantern i:nth-child(2) {
+  inset: auto;
+  left: 40%; top: 38%; width: 20%; height: 10%;
+  border: 3px solid #6c5540;
+  border-bottom: 0;
+  border-radius: 50% 50% 0 0;
+}
+
+@keyframes lantern-glow { to { opacity: .6; transform: scale(.85); } }
+
 .map-fruit-tree::after {
   background:
     radial-gradient(circle at 28% 54%, #e7834d 0 7%, transparent 8%),
@@ -912,10 +955,11 @@ button:focus-visible { outline: 4px solid #fff2a8; outline-offset: 3px; }
 
 @media (prefers-reduced-motion: reduce) {
   .player { transition: none; }
-  .map-pond i, .map-shore-creature i, .map-insect-grass i, .map-insect-flowers i { animation: none !important; }
+  .map-pond i, .map-shore-creature i, .map-insect-grass i, .map-insect-flowers i, .map-lantern::before { animation: none !important; }
 }
 
 .capture-mode .map-pond i,
 .capture-mode .map-shore-creature i,
 .capture-mode .map-insect-grass i,
-.capture-mode .map-insect-flowers i { animation: none !important; }
+.capture-mode .map-insect-flowers i,
+.capture-mode .map-lantern::before { animation: none !important; }
