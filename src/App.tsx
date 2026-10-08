@@ -249,16 +249,22 @@ function App() {
   }, [user, world])
 
   const gardenAction = useCallback(() => {
-    if (!user || !world || world.day < 12) return false
+    if (!user || !world || world.day < 17) return false
     fetch('/api/garden-action', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ x: position.x, y: position.y }),
-    }).then(async response => ({ response, result: await response.json() as { error?: string; message?: string } }))
+    }).then(async response => ({ response, result: await response.json() as { error?: string; message?: string; state?: string } }))
       .then(({ response, result }) => {
         setMessage(response.ok ? (result.message ?? '庭に変化がありました。') : (result.error ?? '庭では何も起きませんでした。'))
-        if (response.ok) fetch('/api/world').then(worldResponse => worldResponse.ok ? worldResponse.json() : null).then(data => {
+        if (!response.ok) return
+        const refreshWorld = () => fetch('/api/world').then(worldResponse => worldResponse.ok ? worldResponse.json() : null).then(data => {
           if (data) setWorld(buildWorld(data))
         }).catch(() => undefined)
+        void refreshWorld()
+        fetch('/api/inventory').then(inventoryResponse => inventoryResponse.ok ? inventoryResponse.json() : null).then(data => {
+          if (data?.items) setInventory(data.items)
+        }).catch(() => undefined)
+        if (result.state === 'watered') window.setTimeout(refreshWorld, 91_000)
       }).catch(() => setMessage('庭の状態を記録できませんでした。'))
     return true
   }, [position, user, world])
@@ -271,13 +277,13 @@ function App() {
   }, [])
 
   const harvestSource = useCallback((target: WorldObject) => {
-    fetch('/api/source-action', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key: target.key }) })
+    fetch('/api/source-action', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key: target.key, x: position.x, y: position.y }) })
       .then(async response => ({ response, result: await response.json() as { error?: string; message?: string } }))
       .then(({ response, result }) => {
         setMessage(response.ok ? (result.message ?? '実りを採りました。') : (result.error ?? 'そこからは採れません。'))
         if (response.ok) fetch('/api/inventory').then(inventoryResponse => inventoryResponse.ok ? inventoryResponse.json() : null).then(data => data?.items && setInventory(data.items)).catch(() => undefined)
       }).catch(() => setMessage('採取を記録できませんでした。'))
-  }, [])
+  }, [position])
 
   const craft = useCallback(() => {
     fetch('/api/craft', { method: 'POST' })
@@ -368,7 +374,14 @@ function App() {
       craft()
       return
     }
-    if (!target && world.day >= 12 && gardenAction()) return
+    if (!target && world.day >= 17) {
+      const ground = world.groundTiles.find(tile => tile.x === position.x && tile.y === position.y)
+      const holdingSeed = inventory.some(item => ['item-seed', 'item-berry', 'item-sprout'].includes(item.key))
+      const gardenTile = ground && ['tilled', 'planted', 'watered', 'grown'].includes(ground.kind)
+      if (!gardenTile && (ground?.kind === 'path' || (!holdingSeed && inventory.length > 0))) {
+        if (placeItem()) return
+      } else if (gardenAction()) return
+    }
     if (!target && world.day >= 6 && inventory.length > 0 && placeItem()) return
     setMessage(target?.key === 'pond' && world.day >= 3
       ? '池の中を小さな魚影が泳いでいます。'

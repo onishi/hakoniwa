@@ -147,7 +147,8 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
   if (url.pathname === '/api/inventory' && request.method === 'GET') {
     const user = await currentUser(request, env)
     if (!user) return json({ error: '持ち物を見るにはログインしてください。' }, 401)
-    const items = await env.DB.prepare(`SELECT player_items.item_key AS key, world_entities.label,
+    const items = await env.DB.prepare(`SELECT player_items.item_key AS key,
+      COALESCE(world_entities.label, CASE player_items.item_key WHEN 'item-sprout' THEN '育った芽' END) AS label,
       player_items.quantity, player_items.first_picked_day AS firstPickedDay
       FROM player_items LEFT JOIN world_entities ON world_entities.entity_key = player_items.item_key
       WHERE player_items.user_id = ? AND player_items.placed_at IS NULL
@@ -372,43 +373,64 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
   }
 
   if (url.pathname === '/api/garden-action' && request.method === 'POST') {
+    if (request.headers.get('origin') !== url.origin) return json({ error: 'このページから操作してください。' }, 403)
     const user = await currentUser(request, env)
     if (!user) return json({ error: '庭を育てるには検証用の記録を始めてください。' }, 401)
     const input = await request.json<{ x?: number; y?: number }>()
     const x = Number(input.x)
     const y = Number(input.y)
     const today = await publishedDay(env)
-    if (!today || today.world_day < 12 || !Number.isInteger(x) || !Number.isInteger(y)) return json({ error: 'まだ庭を育てられません。' }, 400)
-    const tile = await env.DB.prepare('SELECT status, seed_key FROM player_garden_tiles WHERE user_id = ? AND x = ? AND y = ?')
-      .bind(user.id, x, y).first<{ status: string; seed_key: string | null }>()
+    if (!today || today.world_day < 17) return json({ error: 'まだ庭を耕せません。' }, 409)
+    const size = mapSize(today.world_day)
+    if (!Number.isInteger(x) || !Number.isInteger(y) || x < 1 || y < 1 || x >= size.width - 1 || y >= size.height - 1) {
+      return json({ error: 'そこは庭の外です。' }, 400)
+    }
+    const [occupied, path] = await Promise.all([
+      env.DB.prepare(`SELECT entity_key FROM world_entities WHERE x <= ? AND x + width > ? AND y <= ? AND y + height > ?
+        AND born_day <= ? AND (gone_day IS NULL OR gone_day > ?) LIMIT 1`)
+        .bind(x, x, y, y, today.world_day, today.world_day).first(),
+      env.DB.prepare(`SELECT kind FROM world_tiles WHERE x = ? AND y = ? AND kind = 'path'
+        AND born_day <= ? AND (gone_day IS NULL OR gone_day > ?) LIMIT 1`)
+        .bind(x, y, today.world_day, today.world_day).first(),
+    ])
+    if (occupied || path) return json({ error: 'その場所には植えられません。' }, 409)
+    const tile = await env.DB.prepare('SELECT status, seed_key, updated_at FROM player_garden_tiles WHERE user_id = ? AND x = ? AND y = ?')
+      .bind(user.id, x, y).first<{ status: string; seed_key: string | null; updated_at: string }>()
     if (!tile) {
       await env.DB.prepare(`INSERT INTO player_garden_tiles (user_id, x, y, status) VALUES (?, ?, ?, 'tilled')`).bind(user.id, x, y).run()
       return json({ ok: true, state: 'tilled', message: '土を耕しました。' })
     }
     if (tile.status === 'tilled') {
-      const seed = await env.DB.prepare(`SELECT item_key FROM player_items WHERE user_id = ? AND placed_at IS NULL AND item_key IN ('item-seed', 'item-berry') ORDER BY CASE item_key WHEN 'item-seed' THEN 0 ELSE 1 END LIMIT 1`)
+      if (today.world_day < 18) return json({ error: '実を植えられるのは DAY 18 からです。' }, 409)
+      const seed = await env.DB.prepare(`SELECT item_key FROM player_items WHERE user_id = ? AND placed_at IS NULL
+        AND item_key IN ('item-seed', 'item-berry', 'item-sprout')
+        ORDER BY CASE item_key WHEN 'item-berry' THEN 0 WHEN 'item-seed' THEN 1 ELSE 2 END LIMIT 1`)
         .bind(user.id).first<{ item_key: string }>()
       if (!seed) return json({ error: '植える種を持っていません。' }, 409)
-      await env.DB.prepare(`UPDATE player_items SET placed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND item_key = ?`).bind(user.id, seed.item_key).run()
+      await env.DB.prepare(`UPDATE player_items SET quantity = CASE WHEN quantity > 1 THEN quantity - 1 ELSE quantity END,
+        placed_at = CASE WHEN quantity > 1 THEN NULL ELSE CURRENT_TIMESTAMP END, updated_at = CURRENT_TIMESTAMP
+        WHERE user_id = ? AND item_key = ? AND placed_at IS NULL`).bind(user.id, seed.item_key).run()
       await env.DB.prepare(`UPDATE player_garden_tiles SET status = 'planted', seed_key = ?, planted_day = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND x = ? AND y = ?`)
         .bind(seed.item_key, today.world_day, user.id, x, y).run()
       return json({ ok: true, state: 'planted', message: '種を植えました。' })
     }
-    if (tile.status === 'planted' && today.world_day >= 16) {
+    if (tile.status === 'planted' && today.world_day >= 19) {
       await env.DB.prepare(`UPDATE player_garden_tiles SET status = 'watered', last_watered_day = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND x = ? AND y = ?`)
         .bind(today.world_day, user.id, x, y).run()
-      return json({ ok: true, state: 'watered', message: '水をやりました。' })
+      return json({ ok: true, state: 'watered', message: '水をやりました。少し待つと芽が育ちます。' })
     }
-    if (tile.status === 'watered' && today.world_day >= 18) {
+    if (tile.status === 'watered' && today.world_day >= 20 && tile.updated_at <= new Date(Date.now() - 90_000).toISOString().replace('T', ' ').slice(0, 19)) {
       await env.DB.prepare(`UPDATE player_garden_tiles SET status = 'tilled', seed_key = NULL, planted_day = NULL, last_watered_day = NULL, updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND x = ? AND y = ?`)
         .bind(user.id, x, y).run()
       await env.DB.prepare(`INSERT INTO player_items (user_id, item_key, quantity, first_picked_day, placed_at)
         VALUES (?, 'item-sprout', 1, ?, NULL)
-        ON CONFLICT(user_id, item_key) DO UPDATE SET quantity = quantity + 1, placed_at = NULL, updated_at = CURRENT_TIMESTAMP`)
+        ON CONFLICT(user_id, item_key) DO UPDATE SET
+          quantity = CASE WHEN player_items.placed_at IS NULL THEN player_items.quantity + 1 ELSE 1 END,
+          placed_at = NULL, updated_at = CURRENT_TIMESTAMP`)
         .bind(user.id, today.world_day).run()
-      return json({ ok: true, state: 'harvested', message: '芽を採りました。' })
+    return json({ ok: true, state: 'harvested', message: '育った芽を採りました。持ち物に残ります。' })
     }
-    return json({ error: 'もう少し時間が必要です。' }, 409)
+    return json({ error: '芽が育つまで、もう少し待ってください。' }, 409)
   }
 
   if (url.pathname === '/api/tool-action' && request.method === 'POST') {
@@ -431,15 +453,29 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
   }
 
   if (url.pathname === '/api/source-action' && request.method === 'POST') {
+    if (request.headers.get('origin') !== url.origin) return json({ error: 'このページから操作してください。' }, 403)
     const user = await currentUser(request, env)
     if (!user) return json({ error: '採るには検証用の記録を始めてください。' }, 401)
-    const input = await request.json<{ key?: string }>()
+    const input = await request.json<{ key?: string; x?: number; y?: number }>()
     const today = await publishedDay(env)
-    if (!today || today.world_day < 20) return json({ error: 'まだ実るものはありません。' }, 400)
-    const source = await env.DB.prepare(`SELECT entity_key, label FROM world_entities
+    if (!today || today.world_day < 16) return json({ error: 'まだ実るものはありません。' }, 400)
+    const x = Number(input.x)
+    const y = Number(input.y)
+    const size = mapSize(today.world_day)
+    if (!Number.isInteger(x) || !Number.isInteger(y) || x < 1 || y < 1 || x >= size.width - 1 || y >= size.height - 1) {
+      return json({ error: 'そこからは届きません。' }, 400)
+    }
+    const source = await env.DB.prepare(`SELECT entity_key, label, x, y, width, height FROM world_entities
       WHERE entity_key = ? AND kind = 'source' AND born_day <= ? AND (gone_day IS NULL OR gone_day > ?)`)
-      .bind(input.key ?? '', today.world_day, today.world_day).first<{ entity_key: string; label: string }>()
+      .bind(input.key ?? '', today.world_day, today.world_day).first<{ entity_key: string; label: string; x: number; y: number; width: number; height: number }>()
     if (!source) return json({ error: 'そこからは採れません。' }, 404)
+    if (today.world_day < 20 && source.entity_key !== 'source-fruit-tree') return json({ error: 'そこから採れるのは、もう少し先です。' }, 409)
+    const dx = Math.max(source.x - x, 0, x - source.x - source.width + 1)
+    const dy = Math.max(source.y - y, 0, y - source.y - source.height + 1)
+    if (dx + dy > 1) return json({ error: 'もう少し近づいてください。' }, 409)
+    const held = await env.DB.prepare('SELECT COALESCE(SUM(quantity), 0) AS total FROM player_items WHERE user_id = ? AND placed_at IS NULL')
+      .bind(user.id).first<{ total: number }>()
+    if ((held?.total ?? 0) >= 5) return json({ error: '持てるものは5つまでです。' }, 429)
     const sourceOutputs: Record<string, string> = {
       'source-fruit-tree': 'item-berry',
       'source-tool-shed': 'item-tool',
@@ -459,7 +495,9 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
     }
     const outputKey = sourceOutputs[source.entity_key] ?? 'item-sprout'
     await env.DB.prepare(`INSERT INTO player_items (user_id, item_key, quantity, first_picked_day, placed_at)
-      VALUES (?, ?, 1, ?, NULL) ON CONFLICT(user_id, item_key) DO UPDATE SET quantity = quantity + 1, placed_at = NULL, updated_at = CURRENT_TIMESTAMP`)
+      VALUES (?, ?, 1, ?, NULL) ON CONFLICT(user_id, item_key) DO UPDATE SET
+        quantity = CASE WHEN player_items.placed_at IS NULL THEN player_items.quantity + 1 ELSE 1 END,
+        placed_at = NULL, updated_at = CURRENT_TIMESTAMP`)
       .bind(user.id, outputKey, today.world_day).run()
     return json({ ok: true, message: `${source.label}から実りを採りました。` })
   }
@@ -498,7 +536,9 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
       today.world_day >= 9 ? env.DB.prepare(`SELECT traces.id, traces.item_key, traces.x, traces.y, world_entities.label, world_entities.sprite
         FROM traces JOIN world_entities ON world_entities.entity_key = traces.item_key
         WHERE traces.world_day <= ? AND traces.expires_at > datetime('now') ORDER BY traces.id`).bind(today.world_day).all<{ id: number; item_key: string; x: number; y: number; label: string; sprite: string }>() : Promise.resolve({ results: [] as { id: number; item_key: string; x: number; y: number; label: string; sprite: string }[] }),
-      viewer ? env.DB.prepare('SELECT x, y, status AS kind FROM player_garden_tiles WHERE user_id = ?').bind(viewer.id).all<Record<string, unknown>>() : Promise.resolve({ results: [] as Record<string, unknown>[] }),
+      viewer ? env.DB.prepare(`SELECT x, y, CASE WHEN status = 'watered' AND ? >= 20
+        AND datetime(updated_at, '+90 seconds') <= CURRENT_TIMESTAMP THEN 'grown' ELSE status END AS kind
+        FROM player_garden_tiles WHERE user_id = ?`).bind(today.world_day, viewer.id).all<Record<string, unknown>>() : Promise.resolve({ results: [] as Record<string, unknown>[] }),
     ])
     const pickedKeys = new Set(picked.results.map(item => item.item_key))
     const traceEntities = traces.results.map(trace => ({
