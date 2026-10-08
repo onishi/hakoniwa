@@ -16,10 +16,10 @@ interface Env {
 
 type User = { id: number; email: string; display_name: string; avatar_url: string | null }
 
-// The garden still has one size. When regions arrive this comes from the world data too.
+// The first expansion opens on Day 22; the later small region opens on Day 48.
 const MAP_WIDTH = 12
 const MAP_HEIGHT = 12
-const mapSize = (worldDay: number) => worldDay >= 48 ? { width: 18, height: 18 } : worldDay >= 28 ? { width: 16, height: 16 } : { width: MAP_WIDTH, height: MAP_HEIGHT }
+const mapSize = (worldDay: number) => worldDay >= 48 ? { width: 18, height: 18 } : worldDay >= 22 ? { width: 16, height: 16 } : { width: MAP_WIDTH, height: MAP_HEIGHT }
 
 /** The newest day that finished its work. A day still being built stays invisible. */
 const isPreview = (env: Env) => env.APP_MODE === 'day1' || env.APP_MODE === 'evolution'
@@ -148,7 +148,8 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
     const user = await currentUser(request, env)
     if (!user) return json({ error: '持ち物を見るにはログインしてください。' }, 401)
     const items = await env.DB.prepare(`SELECT player_items.item_key AS key,
-      COALESCE(world_entities.label, CASE player_items.item_key WHEN 'item-sprout' THEN '育った芽' END) AS label,
+      COALESCE(world_entities.label, CASE player_items.item_key
+        WHEN 'item-sprout' THEN '育った芽' WHEN 'item-ore' THEN '石のかけら' WHEN 'item-wood' THEN '木材' END) AS label,
       player_items.quantity, player_items.first_picked_day AS firstPickedDay
       FROM player_items LEFT JOIN world_entities ON world_entities.entity_key = player_items.item_key
       WHERE player_items.user_id = ? AND player_items.placed_at IS NULL
@@ -434,22 +435,39 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
   }
 
   if (url.pathname === '/api/tool-action' && request.method === 'POST') {
+    if (request.headers.get('origin') !== url.origin) return json({ error: 'このページから操作してください。' }, 403)
     const user = await currentUser(request, env)
     if (!user) return json({ error: '道具を使うには検証用の記録を始めてください。' }, 401)
-    const input = await request.json<{ key?: string }>()
+    const input = await request.json<{ key?: string; x?: number; y?: number }>()
     const today = await publishedDay(env)
-    if (!today || today.world_day < 33) return json({ error: 'まだ掘ったり割ったりできません。' }, 400)
-    const target = await env.DB.prepare(`SELECT entity_key, label FROM world_entities WHERE entity_key = ? AND kind = 'resource' AND born_day <= ?`)
-      .bind(input.key ?? '', today.world_day).first<{ entity_key: string; label: string }>()
+    if (!today || today.world_day < 25) return json({ error: 'まだ掘ったり割ったりできません。' }, 409)
+    const x = Number(input.x)
+    const y = Number(input.y)
+    const size = mapSize(today.world_day)
+    if (!Number.isInteger(x) || !Number.isInteger(y) || x < 1 || y < 1 || x >= size.width - 1 || y >= size.height - 1) {
+      return json({ error: 'そこからは届きません。' }, 400)
+    }
+    const target = await env.DB.prepare(`SELECT entity_key, label, x, y, width, height FROM world_entities
+      WHERE entity_key = ? AND kind = 'resource' AND born_day <= ? AND (gone_day IS NULL OR gone_day > ?)`)
+      .bind(input.key ?? '', today.world_day, today.world_day)
+      .first<{ entity_key: string; label: string; x: number; y: number; width: number; height: number }>()
     if (!target) return json({ error: 'そこには道具を使えません。' }, 404)
+    const dx = Math.max(target.x - x, 0, x - target.x - target.width + 1)
+    const dy = Math.max(target.y - y, 0, y - target.y - target.height + 1)
+    if (dx + dy > 1) return json({ error: 'もう少し近づいてください。' }, 409)
     const tool = await env.DB.prepare("SELECT item_key FROM player_items WHERE user_id = ? AND item_key = 'item-tool' AND placed_at IS NULL")
       .bind(user.id).first()
     if (!tool) return json({ error: '使える道具を持っていません。' }, 409)
+    const held = await env.DB.prepare('SELECT COALESCE(SUM(quantity), 0) AS total FROM player_items WHERE user_id = ? AND placed_at IS NULL')
+      .bind(user.id).first<{ total: number }>()
+    if ((held?.total ?? 0) >= 5) return json({ error: '持てるものは5つまでです。' }, 429)
     const outputKey = target.entity_key === 'resource-rock' ? 'item-ore' : 'item-wood'
     await env.DB.prepare(`INSERT INTO player_items (user_id, item_key, quantity, first_picked_day, placed_at)
-      VALUES (?, ?, 1, ?, NULL) ON CONFLICT(user_id, item_key) DO UPDATE SET quantity = quantity + 1, placed_at = NULL, updated_at = CURRENT_TIMESTAMP`)
+      VALUES (?, ?, 1, ?, NULL) ON CONFLICT(user_id, item_key) DO UPDATE SET
+        quantity = CASE WHEN player_items.placed_at IS NULL THEN player_items.quantity + 1 ELSE 1 END,
+        placed_at = NULL, updated_at = CURRENT_TIMESTAMP`)
       .bind(user.id, outputKey, today.world_day).run()
-    return json({ ok: true, message: `${target.label}から素材を取り出しました。` })
+    return json({ ok: true, message: `${target.label}から${outputKey === 'item-ore' ? '石のかけら' : '木材'}を取り出しました。持ち物に残ります。` })
   }
 
   if (url.pathname === '/api/source-action' && request.method === 'POST') {
@@ -473,6 +491,11 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
     const dx = Math.max(source.x - x, 0, x - source.x - source.width + 1)
     const dy = Math.max(source.y - y, 0, y - source.y - source.height + 1)
     if (dx + dy > 1) return json({ error: 'もう少し近づいてください。' }, 409)
+    if (source.entity_key === 'source-tool-shed') {
+      const borrowed = await env.DB.prepare("SELECT item_key FROM player_items WHERE user_id = ? AND item_key = 'item-tool' AND placed_at IS NULL")
+        .bind(user.id).first()
+      if (borrowed) return json({ ok: true, message: '道具は手元にあります。岩や倒木に使えます。' })
+    }
     const held = await env.DB.prepare('SELECT COALESCE(SUM(quantity), 0) AS total FROM player_items WHERE user_id = ? AND placed_at IS NULL')
       .bind(user.id).first<{ total: number }>()
     if ((held?.total ?? 0) >= 5) return json({ error: '持てるものは5つまでです。' }, 429)
@@ -499,7 +522,9 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
         quantity = CASE WHEN player_items.placed_at IS NULL THEN player_items.quantity + 1 ELSE 1 END,
         placed_at = NULL, updated_at = CURRENT_TIMESTAMP`)
       .bind(user.id, outputKey, today.world_day).run()
-    return json({ ok: true, message: `${source.label}から実りを採りました。` })
+    return json({ ok: true, message: source.entity_key === 'source-tool-shed'
+      ? '小さな道具を借りました。岩や倒木に使えます。'
+      : `${source.label}から${source.entity_key === 'source-fruit-tree' ? '実り' : '素材'}を採りました。` })
   }
 
   if (url.pathname === '/api/craft' && request.method === 'POST') {

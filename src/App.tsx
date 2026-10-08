@@ -270,11 +270,14 @@ function App() {
   }, [position, user, world])
 
   const performTool = useCallback((target: WorldObject) => {
-    fetch('/api/tool-action', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key: target.key }) })
+    fetch('/api/tool-action', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key: target.key, x: position.x, y: position.y }) })
       .then(async response => ({ response, result: await response.json() as { error?: string; message?: string } }))
-      .then(({ response, result }) => setMessage(response.ok ? (result.message ?? '素材を取り出しました。') : (result.error ?? '道具を使えません。')))
+      .then(({ response, result }) => {
+        setMessage(response.ok ? (result.message ?? '素材を取り出しました。') : (result.error ?? '道具を使えません。'))
+        if (response.ok) fetch('/api/inventory').then(inventoryResponse => inventoryResponse.ok ? inventoryResponse.json() : null).then(data => data?.items && setInventory(data.items)).catch(() => undefined)
+      })
       .catch(() => setMessage('道具の操作を記録できませんでした。'))
-  }, [])
+  }, [position])
 
   const harvestSource = useCallback((target: WorldObject) => {
     fetch('/api/source-action', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key: target.key, x: position.x, y: position.y }) })
@@ -343,7 +346,8 @@ function App() {
       return
     }
     if (target?.kind === 'resource') {
-      performTool(target)
+      if (world.day >= 25) performTool(target)
+      else setMessage(target.message)
       return
     }
     if (target?.kind === 'source') {
