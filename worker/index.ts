@@ -329,6 +329,7 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
   }
 
   if (url.pathname === '/api/place' && request.method === 'POST') {
+    if (request.headers.get('origin') !== url.origin) return json({ error: 'このページから操作してください。' }, 403)
     const user = await currentUser(request, env)
     if (!user) return json({ error: '置くには検証用の記録を始めてください。' }, 401)
     const input = await request.json<{ itemKey?: string; x?: number; y?: number }>()
@@ -344,6 +345,37 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
     const held = await env.DB.prepare(`SELECT player_items.item_key FROM player_items
       WHERE user_id = ? AND item_key = ? AND placed_at IS NULL`).bind(user.id, itemKey).first()
     if (!held) return json({ error: '手に持っているものがありません。' }, 409)
+    if (itemKey === 'item-lantern') {
+      if (today.world_day < 29) return json({ error: '灯りを置けるのは DAY 29 からです。' }, 409)
+      if (x > 10 || y > 10) return json({ error: '灯りは最初の庭に置いてください。' }, 409)
+      const [occupied, path, garden, trace] = await Promise.all([
+        env.DB.prepare(`SELECT entity_key FROM world_entities WHERE x <= ? AND x + width > ? AND y <= ? AND y + height > ?
+          AND born_day <= ? AND (gone_day IS NULL OR gone_day > ?) LIMIT 1`)
+          .bind(x, x, y, y, today.world_day, today.world_day).first(),
+        env.DB.prepare(`SELECT kind FROM world_tiles WHERE x = ? AND y = ? AND kind = 'path'
+          AND born_day <= ? AND (gone_day IS NULL OR gone_day > ?) LIMIT 1`)
+          .bind(x, y, today.world_day, today.world_day).first(),
+        env.DB.prepare('SELECT status FROM player_garden_tiles WHERE user_id = ? AND x = ? AND y = ?')
+          .bind(user.id, x, y).first(),
+        env.DB.prepare("SELECT id FROM traces WHERE x = ? AND y = ? AND expires_at > datetime('now') LIMIT 1")
+          .bind(x, y).first(),
+      ])
+      if (occupied || path || garden || trace) return json({ error: 'その場所には灯りを置けません。' }, 409)
+      const token = randomToken()
+      const results = await env.DB.batch([
+        env.DB.prepare(`INSERT OR IGNORE INTO player_decorations (user_id, item_key, x, y, world_day, placement_token)
+          SELECT ?, 'item-lantern', ?, ?, ?, ? WHERE EXISTS (
+            SELECT 1 FROM player_items WHERE user_id = ? AND item_key = 'item-lantern' AND placed_at IS NULL)`)
+          .bind(user.id, x, y, today.world_day, token, user.id),
+        env.DB.prepare(`UPDATE player_items SET quantity = CASE WHEN quantity > 1 THEN quantity - 1 ELSE quantity END,
+          placed_at = CASE WHEN quantity > 1 THEN NULL ELSE CURRENT_TIMESTAMP END, updated_at = CURRENT_TIMESTAMP
+          WHERE user_id = ? AND item_key = 'item-lantern' AND placed_at IS NULL
+          AND EXISTS (SELECT 1 FROM player_decorations WHERE user_id = ? AND item_key = 'item-lantern' AND placement_token = ?)`)
+          .bind(user.id, user.id, token),
+      ])
+      if (!results[0].meta.changes) return json({ error: '灯りはすでに庭にあります。' }, 409)
+      return json({ ok: true, decoration: true, message: '小さな灯りを庭に置きました。次に来たときも、ここにあります。' }, 201)
+    }
     const blocked = await env.DB.prepare(`SELECT entity_key FROM world_entities
       WHERE x <= ? AND x + width > ? AND y <= ? AND y + height > ?
       AND blocks = 1 AND born_day <= ? AND (gone_day IS NULL OR gone_day > ?)`)
@@ -528,19 +560,58 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
   }
 
   if (url.pathname === '/api/craft' && request.method === 'POST') {
+    if (request.headers.get('origin') !== url.origin) return json({ error: 'このページから操作してください。' }, 403)
     const user = await currentUser(request, env)
     if (!user) return json({ error: '作るには検証用の記録を始めてください。' }, 401)
+    const input = await request.json<{ x?: number; y?: number }>()
     const today = await publishedDay(env)
-    if (!today || today.world_day < 35) return json({ error: 'まだ作れるものはありません。' }, 400)
-    const materials = await env.DB.prepare(`SELECT item_key FROM player_items WHERE user_id = ? AND placed_at IS NULL AND item_key IN ('item-ore', 'item-wood')`)
-      .bind(user.id).all<{ item_key: string }>()
-    const keys = new Set(materials.results.map(row => row.item_key))
-    if (!keys.has('item-ore') || !keys.has('item-wood')) return json({ error: '鉱石と木材が必要です。' }, 409)
-    for (const key of ['item-ore', 'item-wood']) await env.DB.prepare('UPDATE player_items SET placed_at = CURRENT_TIMESTAMP WHERE user_id = ? AND item_key = ?').bind(user.id, key).run()
-    await env.DB.prepare(`INSERT INTO player_items (user_id, item_key, quantity, first_picked_day, placed_at)
-      VALUES (?, 'item-lantern', 1, ?, NULL) ON CONFLICT(user_id, item_key) DO UPDATE SET quantity = quantity + 1, placed_at = NULL, updated_at = CURRENT_TIMESTAMP`)
-      .bind(user.id, today.world_day).run()
-    return json({ ok: true, message: '小さな灯りを作りました。' })
+    if (!today || today.world_day < 28) return json({ error: 'まだ作れるものはありません。' }, 409)
+    const x = Number(input.x)
+    const y = Number(input.y)
+    const size = mapSize(today.world_day)
+    if (!Number.isInteger(x) || !Number.isInteger(y) || x < 1 || y < 1 || x >= size.width - 1 || y >= size.height - 1) {
+      return json({ error: 'そこからは届きません。' }, 400)
+    }
+    const [workbench, recipe] = await Promise.all([
+      env.DB.prepare(`SELECT x, y, width, height FROM world_entities WHERE entity_key = 'workbench'
+        AND born_day <= ? AND (gone_day IS NULL OR gone_day > ?)`)
+        .bind(today.world_day, today.world_day).first<{ x: number; y: number; width: number; height: number }>(),
+      env.DB.prepare("SELECT recipe_key, label, ingredient_a, ingredient_b, output_key FROM craft_recipes WHERE recipe_key = 'lantern' AND born_day <= ?")
+        .bind(today.world_day).first<{ recipe_key: string; label: string; ingredient_a: string; ingredient_b: string; output_key: string }>(),
+    ])
+    if (!workbench || !recipe) return json({ error: '作業台はまだありません。' }, 404)
+    const dx = Math.max(workbench.x - x, 0, x - workbench.x - workbench.width + 1)
+    const dy = Math.max(workbench.y - y, 0, y - workbench.y - workbench.height + 1)
+    if (dx + dy > 1) return json({ error: '作業台へ近づいてください。' }, 409)
+    const claim = randomToken()
+    const results = await env.DB.batch([
+      env.DB.prepare(`INSERT OR IGNORE INTO player_crafts (user_id, recipe_key, claim_token, world_day)
+        SELECT ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM player_items WHERE user_id = ? AND item_key = ?)
+        AND EXISTS (SELECT 1 FROM player_items WHERE user_id = ? AND item_key = ? AND placed_at IS NULL)
+        AND EXISTS (SELECT 1 FROM player_items WHERE user_id = ? AND item_key = ? AND placed_at IS NULL)`)
+        .bind(user.id, recipe.recipe_key, claim, today.world_day, user.id, recipe.output_key,
+          user.id, recipe.ingredient_a, user.id, recipe.ingredient_b),
+      env.DB.prepare(`UPDATE player_items SET quantity = CASE WHEN quantity > 1 THEN quantity - 1 ELSE quantity END,
+        placed_at = CASE WHEN quantity > 1 THEN NULL ELSE CURRENT_TIMESTAMP END, updated_at = CURRENT_TIMESTAMP
+        WHERE user_id = ? AND item_key = ? AND placed_at IS NULL
+        AND EXISTS (SELECT 1 FROM player_crafts WHERE user_id = ? AND recipe_key = ? AND claim_token = ?)`)
+        .bind(user.id, recipe.ingredient_a, user.id, recipe.recipe_key, claim),
+      env.DB.prepare(`UPDATE player_items SET quantity = CASE WHEN quantity > 1 THEN quantity - 1 ELSE quantity END,
+        placed_at = CASE WHEN quantity > 1 THEN NULL ELSE CURRENT_TIMESTAMP END, updated_at = CURRENT_TIMESTAMP
+        WHERE user_id = ? AND item_key = ? AND placed_at IS NULL
+        AND EXISTS (SELECT 1 FROM player_crafts WHERE user_id = ? AND recipe_key = ? AND claim_token = ?)`)
+        .bind(user.id, recipe.ingredient_b, user.id, recipe.recipe_key, claim),
+      env.DB.prepare(`INSERT INTO player_items (user_id, item_key, quantity, first_picked_day, placed_at)
+        SELECT ?, ?, 1, ?, NULL WHERE EXISTS (
+          SELECT 1 FROM player_crafts WHERE user_id = ? AND recipe_key = ? AND claim_token = ?)`)
+        .bind(user.id, recipe.output_key, today.world_day, user.id, recipe.recipe_key, claim),
+    ])
+    if (!results[0].meta.changes) {
+      const crafted = await env.DB.prepare('SELECT recipe_key FROM player_crafts WHERE user_id = ? AND recipe_key = ?')
+        .bind(user.id, recipe.recipe_key).first()
+      return json({ error: crafted ? '灯りはすでに作りました。' : '石のかけらと木材が必要です。' }, 409)
+    }
+    return json({ ok: true, message: `${recipe.label}を作りました。DAY 29から最初の庭に置けます。` })
   }
 
   if (url.pathname === '/api/world' && request.method === 'GET') {
@@ -550,7 +621,7 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
     const size = mapSize(today.world_day)
 
     // Everything is pinned to the published day, so one visit never mixes two days together.
-    const [entities, tiles, picked, traces, gardenTiles] = await Promise.all([
+    const [entities, tiles, picked, traces, gardenTiles, decorations] = await Promise.all([
       env.DB.prepare(`SELECT entity_key AS key, kind, x, y, width, height, sprite, label, message, panel, flat, blocks
         FROM world_entities WHERE born_day <= ?1 AND (gone_day IS NULL OR gone_day > ?1) ORDER BY y, x`)
         .bind(today.world_day).all<Record<string, unknown>>(),
@@ -564,11 +635,20 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
       viewer ? env.DB.prepare(`SELECT x, y, CASE WHEN status = 'watered' AND ? >= 20
         AND datetime(updated_at, '+90 seconds') <= CURRENT_TIMESTAMP THEN 'grown' ELSE status END AS kind
         FROM player_garden_tiles WHERE user_id = ?`).bind(today.world_day, viewer.id).all<Record<string, unknown>>() : Promise.resolve({ results: [] as Record<string, unknown>[] }),
+      viewer && today.world_day >= 29 ? env.DB.prepare('SELECT item_key, x, y FROM player_decorations WHERE user_id = ? AND world_day <= ?')
+        .bind(viewer.id, today.world_day).all<{ item_key: string; x: number; y: number }>()
+        : Promise.resolve({ results: [] as { item_key: string; x: number; y: number }[] }),
     ])
     const pickedKeys = new Set(picked.results.map(item => item.item_key))
     const traceEntities = traces.results.map(trace => ({
       key: `trace-${trace.id}`, kind: 'trace', x: trace.x, y: trace.y, width: 1, height: 1,
       sprite: trace.sprite, label: '誰かの置いた跡', message: `${trace.label}が、ここに置かれていました。`,
+      panel: null, flat: false, blocks: false,
+    }))
+    const decorationEntities = decorations.results.map(decoration => ({
+      key: `decoration-${decoration.item_key}`, kind: 'decoration', x: decoration.x, y: decoration.y,
+      width: 1, height: 1, sprite: 'map-lantern', label: '小さな灯り',
+      message: 'あなたが作って置いた灯りです。次に来たときも、ここにあります。',
       panel: null, flat: false, blocks: false,
     }))
 
@@ -580,7 +660,7 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
         ...row,
         flat: Boolean(row.flat),
         blocks: Boolean(row.blocks),
-      })), ...traceEntities],
+      })), ...traceEntities, ...decorationEntities],
       tiles: [...tiles.results, ...gardenTiles.results],
     })
   }

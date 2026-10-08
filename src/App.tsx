@@ -207,18 +207,20 @@ function App() {
 
   const placeItem = useCallback(() => {
     if (!user || !world || world.day < 6 || inventory.length === 0) return false
-    const item = inventory[0]
+    const item = world.day >= 29 ? inventory.find(entry => entry.key === 'item-lantern') ?? inventory[0] : inventory[0]
     fetch('/api/place', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ itemKey: item.key, x: position.x, y: position.y }),
-    }).then(async response => ({ response, result: await response.json() as { error?: string } }))
+    }).then(async response => ({ response, result: await response.json() as { error?: string; message?: string } }))
       .then(({ response, result }) => {
         if (!response.ok) {
           setMessage(result.error ?? 'そこには置けません。')
           return
         }
-        setInventory(current => current.slice(1))
-        setMessage(`${item.label ?? item.key}を置きました。`)
+        setMessage(result.message ?? `${item.label ?? item.key}を置きました。`)
+        fetch('/api/inventory').then(inventoryResponse => inventoryResponse.ok ? inventoryResponse.json() : null).then(data => {
+          if (data?.items) setInventory(data.items)
+        }).catch(() => undefined)
         fetch('/api/world').then(result => result.ok ? result.json() : null).then(data => {
           if (data) setWorld(buildWorld(data))
         }).catch(() => undefined)
@@ -289,13 +291,14 @@ function App() {
   }, [position])
 
   const craft = useCallback(() => {
-    fetch('/api/craft', { method: 'POST' })
+    fetch('/api/craft', { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ x: position.x, y: position.y }) })
       .then(async response => ({ response, result: await response.json() as { error?: string; message?: string } }))
       .then(({ response, result }) => {
         setMessage(response.ok ? (result.message ?? '何かを作りました。') : (result.error ?? 'まだ作れません。'))
         if (response.ok) fetch('/api/inventory').then(inventoryResponse => inventoryResponse.ok ? inventoryResponse.json() : null).then(data => data?.items && setInventory(data.items)).catch(() => undefined)
       }).catch(() => setMessage('作ったものを記録できませんでした。'))
-  }, [])
+  }, [position])
 
   const fishingAction = useCallback((target: 'rod' | 'pond') => {
     if (!user) {
@@ -345,6 +348,10 @@ function App() {
       reclaimTrace(target)
       return
     }
+    if (target?.kind === 'decoration') {
+      setMessage(target.message)
+      return
+    }
     if (target?.kind === 'resource') {
       if (world.day >= 25) performTool(target)
       else setMessage(target.message)
@@ -374,15 +381,17 @@ function App() {
       insectAction('flowers')
       return
     }
-    if (target?.key === 'house' && world.day >= 35) {
-      craft()
+    if (target?.key === 'workbench') {
+      if (world.day >= 28) craft()
+      else setMessage(target.message)
       return
     }
     if (!target && world.day >= 17) {
       const ground = world.groundTiles.find(tile => tile.x === position.x && tile.y === position.y)
       const holdingSeed = inventory.some(item => ['item-seed', 'item-berry', 'item-sprout'].includes(item.key))
       const gardenTile = ground && ['tilled', 'planted', 'watered', 'grown'].includes(ground.kind)
-      if (!gardenTile && (ground?.kind === 'path' || (!holdingSeed && inventory.length > 0))) {
+      const holdingLantern = world.day >= 29 && inventory.some(item => item.key === 'item-lantern')
+      if (!gardenTile && (holdingLantern || ground?.kind === 'path' || (!holdingSeed && inventory.length > 0))) {
         if (placeItem()) return
       } else if (gardenAction()) return
     }
