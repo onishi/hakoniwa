@@ -224,6 +224,82 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
     return json({ state: 'idle', releasedCount: changed.released_count, message: '魚を池へ戻しました。魚影がゆっくり泳ぎ去ります。' })
   }
 
+  if (url.pathname === '/api/insects' && request.method === 'GET') {
+    const user = await currentUser(request, env)
+    if (!user) return json({ state: 'free', netBorrowed: false, released: false, flowerTended: false })
+    const insects = await env.DB.prepare('SELECT net_borrowed, state, released_count, flower_tended FROM player_insects WHERE user_id = ?')
+      .bind(user.id).first<{ net_borrowed: number; state: 'free' | 'held'; released_count: number; flower_tended: number }>()
+    return json({
+      state: insects?.state ?? 'free',
+      netBorrowed: Boolean(insects?.net_borrowed),
+      released: Boolean(insects?.released_count),
+      flowerTended: Boolean(insects?.flower_tended),
+    })
+  }
+
+  if (url.pathname === '/api/insects' && request.method === 'POST') {
+    if (request.headers.get('origin') !== url.origin) return json({ error: 'このページから操作してください。' }, 403)
+    const today = await publishedDay(env)
+    if (!today || today.world_day < 12) return json({ error: 'まだ虫の気配はありません。' }, 409)
+    const input = await request.json<{ target?: string; x?: number; y?: number }>()
+    const x = Number(input.x)
+    const y = Number(input.y)
+    const size = mapSize(today.world_day)
+    if (!Number.isInteger(x) || !Number.isInteger(y) || x < 1 || y < 1 || x >= size.width - 1 || y >= size.height - 1) {
+      return json({ error: 'そこからは届きません。' }, 400)
+    }
+    const key = input.target === 'grass' ? 'insect-grass'
+      : input.target === 'net' ? 'insect-net'
+        : input.target === 'flowers' ? 'insect-flowers' : null
+    if (!key) return json({ error: '場所を選んでください。' }, 400)
+    const target = await env.DB.prepare(`SELECT x, y, width, height FROM world_entities
+      WHERE entity_key = ? AND born_day <= ? AND (gone_day IS NULL OR gone_day > ?)`)
+      .bind(key, today.world_day, today.world_day).first<{ x: number; y: number; width: number; height: number }>()
+    if (!target) return json({ error: 'そこにはまだ何もありません。' }, 404)
+    const dx = Math.max(target.x - x, 0, x - target.x - target.width + 1)
+    const dy = Math.max(target.y - y, 0, y - target.y - target.height + 1)
+    if (dx + dy > 1) return json({ error: 'もう少し近づいてください。' }, 409)
+
+    const user = await currentUser(request, env)
+    if (!user && key === 'insect-grass') return json({ state: 'free', message: '草むらの虫が葉の間を行き来しています。' })
+    if (!user) return json({ error: '記録するには、まず検証用の記録を始めてください。' }, 401)
+    await env.DB.prepare('INSERT OR IGNORE INTO player_insects (user_id, world_day) VALUES (?, ?)')
+      .bind(user.id, today.world_day).run()
+    await env.DB.prepare('UPDATE player_insects SET world_day = ? WHERE user_id = ?')
+      .bind(today.world_day, user.id).run()
+    const insects = await env.DB.prepare('SELECT net_borrowed, state, flower_tended FROM player_insects WHERE user_id = ?')
+      .bind(user.id).first<{ net_borrowed: number; state: 'free' | 'held'; flower_tended: number }>()
+    if (key === 'insect-net') {
+      if (today.world_day < 13) return json({ error: 'まだ網はありません。' }, 409)
+      await env.DB.prepare('UPDATE player_insects SET net_borrowed = 1, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?')
+        .bind(user.id).run()
+      return json({ state: insects?.state ?? 'free', netBorrowed: true, message: '網を借りました。草むらへ向けてアクションしてください。' })
+    }
+    if (key === 'insect-grass') {
+      if (today.world_day < 14 || !insects?.net_borrowed) {
+        await env.DB.prepare('UPDATE player_insects SET observed_count = observed_count + 1, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?')
+          .bind(user.id).run()
+        return json({ state: insects?.state ?? 'free', message: '草むらの虫が葉の間を行き来しています。' })
+      }
+      if (insects.state === 'held') return json({ state: 'held', message: '虫を持っています。岸辺の花のそばへ戻せます。' })
+      const changed = await env.DB.prepare(`UPDATE player_insects SET state = 'held', updated_at = CURRENT_TIMESTAMP
+        WHERE user_id = ? AND state = 'free' RETURNING state`).bind(user.id).first()
+      if (!changed) return json({ error: 'もう一度、草むらを見てください。' }, 409)
+      return json({ state: 'held', message: '小さな虫を網に迎えました。岸辺の花へ戻せます。' })
+    }
+    if (insects?.state === 'held') {
+      const changed = await env.DB.prepare(`UPDATE player_insects SET state = 'free', released_count = released_count + 1,
+        updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND state = 'held' RETURNING released_count`)
+        .bind(user.id).first<{ released_count: number }>()
+      if (!changed) return json({ error: 'もう一度、花を見てください。' }, 409)
+      return json({ state: 'free', released: true, releasedCount: changed.released_count, flowerTended: Boolean(insects.flower_tended), message: '虫を花のそばへ戻しました。葉の間に姿が見えます。' })
+    }
+    if (today.world_day < 15) return json({ state: 'free', message: '花のそばで虫を待てそうです。' })
+    await env.DB.prepare('UPDATE player_insects SET flower_tended = 1, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?')
+      .bind(user.id).run()
+    return json({ state: 'free', flowerTended: true, message: '花のまわりを整えました。次の訪問でも虫が来られそうです。' })
+  }
+
   if (url.pathname === '/api/pickup' && request.method === 'POST') {
     const user = await currentUser(request, env)
     if (!user) return json({ error: '拾うには検証用の記録を始めてください。' }, 401)

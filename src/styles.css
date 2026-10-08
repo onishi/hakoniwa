@@ -576,6 +576,94 @@ button {
   background: rgb(236 234 209 / 80%);
 }
 
+.map-insect-grass i:first-child {
+  left: 18%;
+  top: 66%;
+  width: 64%;
+  height: 18%;
+  border-radius: 50%;
+  background: #3c6b42;
+  box-shadow: 0 4px 0 rgb(29 49 33 / 25%);
+}
+
+.map-insect-grass i:nth-child(2) {
+  left: 28%;
+  top: 44%;
+  width: 45%;
+  height: 36%;
+  clip-path: polygon(0 100%, 8% 24%, 27% 76%, 42% 2%, 57% 74%, 82% 20%, 100% 100%);
+  background: #69a758;
+  transform-origin: 50% 100%;
+  animation: grass-breathe 3.4s ease-in-out infinite alternate;
+}
+
+.map-insect-grass i:nth-child(3),
+.map-insect-flowers i:nth-child(3) {
+  left: 52%;
+  top: 43%;
+  width: 9%;
+  height: 8%;
+  border-radius: 50%;
+  background: #413a29;
+  box-shadow: -5px -3px 0 -2px #e7dab0, 4px -4px 0 -2px #e7dab0;
+  animation: insect-hop 3.1s ease-in-out infinite alternate;
+}
+
+.map-insect-grass.bug-held i:nth-child(3) { opacity: 0; }
+
+.map-insect-net i:first-child {
+  left: 38%;
+  top: 38%;
+  width: 5%;
+  height: 48%;
+  border-radius: 4px;
+  background: #9d6c3e;
+  transform: rotate(26deg);
+}
+
+.map-insect-net i:nth-child(2) {
+  left: 36%;
+  top: 21%;
+  width: 33%;
+  height: 27%;
+  border: 4px solid #dfca99;
+  border-radius: 50%;
+  background: repeating-linear-gradient(45deg, transparent 0 5px, rgb(223 202 153 / 70%) 6px 7px);
+  transform: rotate(-20deg);
+}
+
+.map-insect-flowers i:first-child {
+  left: 19%;
+  top: 68%;
+  width: 62%;
+  height: 16%;
+  border-radius: 50%;
+  background: #4c7c4a;
+}
+
+.map-insect-flowers i:nth-child(2) {
+  left: 36%;
+  top: 39%;
+  width: 27%;
+  height: 33%;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 50%, #e5b557 0 20%, #f2e6cb 22% 65%, transparent 67%);
+  box-shadow: -13px 10px 0 -6px #e8ccdb, 13px 8px 0 -6px #f1dfad;
+}
+
+.map-insect-flowers i:nth-child(3) { opacity: 0; }
+.map-insect-flowers.flower-attracted i:nth-child(3) { opacity: 1; }
+
+@keyframes grass-breathe {
+  from { transform: rotate(-5deg); }
+  to { transform: rotate(5deg); }
+}
+
+@keyframes insect-hop {
+  0%, 25% { transform: translate(-15%, 8%); }
+  70%, 100% { transform: translate(45%, -25%); }
+}
+
 @keyframes pond-ripple {
   from { opacity: .8; transform: scale(.4); }
   to { opacity: 0; transform: scale(2.5); }
@@ -753,8 +841,10 @@ button:focus-visible { outline: 4px solid #fff2a8; outline-offset: 3px; }
 
 @media (prefers-reduced-motion: reduce) {
   .player { transition: none; }
-  .map-pond i, .map-shore-creature i { animation: none !important; }
+  .map-pond i, .map-shore-creature i, .map-insect-grass i, .map-insect-flowers i { animation: none !important; }
 }
 
 .capture-mode .map-pond i,
-.capture-mode .map-shore-creature i { animation: none !important; }
+.capture-mode .map-shore-creature i,
+.capture-mode .map-insect-grass i,
+.capture-mode .map-insect-flowers i { animation: none !important; }
