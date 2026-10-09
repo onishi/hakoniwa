@@ -622,6 +622,44 @@ button {
   animation: fish-swim 4.6s ease-in-out infinite alternate;
 }
 
+.map-pond.pond-shallows::after {
+  background:
+    linear-gradient(145deg, rgb(192 222 174 / 80%) 8%, transparent 42%),
+    repeating-linear-gradient(26.565deg, rgb(255 255 255 / 12%) 0 3px, transparent 3px 10px),
+    linear-gradient(200deg, #8fc3ba 0 34%, #4a8e9c 35% 72%, #315e72 73%);
+}
+
+.map-pond.pond-shallows i:nth-child(2) { left: 35%; top: 39%; width: 14%; height: 5%; }
+.map-pond.pond-shallows i:nth-child(3) { left: 32%; top: 39%; width: 5%; height: 5%; }
+
+.map-pond .pond-deep-fish { display: none; }
+.map-pond.pond-two-fish .pond-deep-fish {
+  display: block;
+  position: absolute;
+  z-index: 2;
+  left: 57%;
+  top: 60%;
+  width: 13%;
+  height: 10%;
+  border-radius: 55% 50% 50% 55%;
+  background: #273e55;
+  box-shadow: 0 2px 0 rgb(17 36 54 / 35%);
+  animation: deep-fish-swim 2.8s ease-in-out infinite alternate;
+}
+.map-pond.pond-two-fish .pond-deep-fish::before {
+  content: '';
+  position: absolute;
+  left: -34%;
+  top: 12%;
+  width: 40%;
+  height: 76%;
+  clip-path: polygon(100% 50%, 0 0, 0 100%);
+  background: #273e55;
+}
+.map-pond.pond-caught .pond-deep-fish { opacity: .3; }
+.map-pond.pond-after-rain i:first-child { left: 61%; top: 53%; animation-duration: 2.4s; }
+.map-pond.pond-after-rain .pond-deep-fish { left: 49%; top: 54%; }
+
 .map-pond .fishing-float {
   display: none;
   position: absolute;
@@ -723,6 +761,22 @@ button {
   animation: insect-hop 3.1s ease-in-out infinite alternate;
 }
 
+.map-insect-meadow i:first-child {
+  left: 15%; top: 65%; width: 70%; height: 17%;
+  border-radius: 50%; background: #476d43;
+}
+.map-insect-meadow i:nth-child(2) {
+  left: 24%; top: 35%; width: 56%; height: 40%;
+  clip-path: polygon(0 100%, 14% 20%, 28% 83%, 45% 0, 60% 82%, 82% 20%, 100% 100%);
+  background: #73a85c;
+}
+.map-insect-meadow i:nth-child(3) {
+  left: 37%; top: 66%; width: 13%; height: 9%;
+  border-radius: 50%; background: #604633;
+  box-shadow: -4px 1px 0 -2px #352d25, 4px 1px 0 -2px #352d25;
+  animation: meadow-crawl 5.4s ease-in-out infinite alternate;
+}
+
 .map-insect-grass.bug-held i:nth-child(3) { opacity: 0; }
 
 .map-insect-net i:first-child {
@@ -786,6 +840,16 @@ button {
 @keyframes fish-swim {
   0%, 18% { transform: translate(-14%, 5%); }
   72%, 100% { transform: translate(45%, -18%); }
+}
+
+@keyframes deep-fish-swim {
+  0%, 24% { transform: translate(10%, 2%) scaleX(-1); }
+  76%, 100% { transform: translate(-45%, -12%) scaleX(-1); }
+}
+
+@keyframes meadow-crawl {
+  0%, 28% { transform: translateX(-24%); }
+  72%, 100% { transform: translateX(40%); }
 }
 
 @keyframes shore-walk {
@@ -955,11 +1019,13 @@ button:focus-visible { outline: 4px solid #fff2a8; outline-offset: 3px; }
 
 @media (prefers-reduced-motion: reduce) {
   .player { transition: none; }
-  .map-pond i, .map-shore-creature i, .map-insect-grass i, .map-insect-flowers i, .map-lantern::before { animation: none !important; }
+  .map-pond i, .map-pond .pond-deep-fish, .map-shore-creature i, .map-insect-grass i, .map-insect-meadow i, .map-insect-flowers i, .map-lantern::before { animation: none !important; }
 }
 
 .capture-mode .map-pond i,
+.capture-mode .map-pond .pond-deep-fish,
 .capture-mode .map-shore-creature i,
 .capture-mode .map-insect-grass i,
+.capture-mode .map-insect-meadow i,
 .capture-mode .map-insect-flowers i,
 .capture-mode .map-lantern::before { animation: none !important; }

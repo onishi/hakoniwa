@@ -162,11 +162,16 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
     if (!user) return json({ error: '記録を始めてください。' }, 401)
     const today = await publishedDay(env)
     if (!today || today.world_day < 8) return json({ state: 'idle', rodBorrowed: false })
-    const fishing = await env.DB.prepare('SELECT rod_borrowed, state, world_day FROM player_fishing WHERE user_id = ?')
-      .bind(user.id).first<{ rod_borrowed: number; state: string; world_day: number }>()
+    const [fishing, observed] = await Promise.all([
+      env.DB.prepare('SELECT rod_borrowed, state, world_day FROM player_fishing WHERE user_id = ?')
+        .bind(user.id).first<{ rod_borrowed: number; state: string; world_day: number }>(),
+      today.world_day >= 33 ? env.DB.prepare('SELECT habitat_key FROM player_habitat_observations WHERE user_id = ?')
+        .bind(user.id).all<{ habitat_key: string }>() : Promise.resolve({ results: [] as { habitat_key: string }[] }),
+    ])
     return json({
       state: fishing?.world_day === today.world_day ? fishing.state : 'idle',
       rodBorrowed: Boolean(fishing?.rod_borrowed),
+      observedHabitats: observed.results.map(row => row.habitat_key),
     })
   }
 
@@ -203,14 +208,26 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
       return json({ state: 'idle', message: '釣り竿を借りました。魚影のある池へ向けてアクションしてください。' })
     }
     if (today.world_day < 8) return json({ error: '魚影をもう少し観察してください。' }, 409)
+    const habitat = x <= target.x - 1 || y <= target.y - 1 ? 'shallow' : 'deep'
+    const habitatName = habitat === 'shallow' ? '浅瀬' : '深場'
     const fishing = await env.DB.prepare('SELECT rod_borrowed, state FROM player_fishing WHERE user_id = ?')
       .bind(user.id).first<{ rod_borrowed: number; state: 'idle' | 'cast' | 'caught' }>()
+    if (fishing?.state === 'idle' && today.world_day >= 33) {
+      const observation = await env.DB.prepare(`INSERT OR IGNORE INTO player_habitat_observations
+        (user_id, habitat_key, first_day) VALUES (?, ?, ?)`).bind(user.id, habitat, today.world_day).run()
+      if (observation.meta.changes) return json({ state: 'idle', observedHabitat: habitat,
+        message: habitat === 'shallow'
+          ? '浅瀬を観察記録に残しました。細い魚影が水草の縁をゆっくり通ります。釣るなら竿を借りて、もう一度アクションしてください。'
+          : '深場を観察記録に残しました。丸い魚影が底の暗い線を速く横切ります。釣るなら竿を借りて、もう一度アクションしてください。' })
+    }
     if (!fishing?.rod_borrowed) return json({ error: '池のそばで竿を借りてください。' }, 409)
     if (fishing.state === 'idle') {
       const changed = await env.DB.prepare(`UPDATE player_fishing SET state = 'cast', updated_at = CURRENT_TIMESTAMP
         WHERE user_id = ? AND state = 'idle' RETURNING state`).bind(user.id).first()
       if (!changed) return json({ error: 'もう一度、池を見てください。' }, 409)
-      return json({ state: 'cast', message: '浮きが揺れました。もう一度アクションすると釣れそうです。' })
+      return json({ state: 'cast', message: today.world_day >= 31
+        ? `${habitatName}へ糸を垂らしました。浮きが揺れています。もう一度アクションすると釣れそうです。`
+        : '浮きが揺れました。もう一度アクションすると釣れそうです。' })
     }
     if (fishing.state === 'cast') {
       if (today.world_day < 10) return json({ state: 'cast', message: '魚影が近づいています。もう少し待ちましょう。' })
@@ -251,6 +268,7 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
       return json({ error: 'そこからは届きません。' }, 400)
     }
     const key = input.target === 'grass' ? 'insect-grass'
+      : input.target === 'meadow' ? 'insect-meadow'
       : input.target === 'net' ? 'insect-net'
         : input.target === 'flowers' ? 'insect-flowers' : null
     if (!key) return json({ error: '場所を選んでください。' }, 400)
@@ -264,6 +282,16 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
 
     const user = await currentUser(request, env)
     if (!user && key === 'insect-grass') return json({ state: 'free', message: '草むらの虫が葉の間を行き来しています。' })
+    if (key === 'insect-meadow') {
+      if (today.world_day < 35) return json({ error: 'まだ歩く虫はいません。' }, 409)
+      if (user) {
+        await env.DB.prepare('INSERT OR IGNORE INTO player_insects (user_id, world_day) VALUES (?, ?)')
+          .bind(user.id, today.world_day).run()
+        await env.DB.prepare('UPDATE player_insects SET observed_count = observed_count + 1, world_day = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?')
+          .bind(today.world_day, user.id).run()
+      }
+      return json({ message: '葉の下を丸い虫が歩いています。岸辺を飛ぶ虫よりゆっくり動きます。' })
+    }
     if (!user) return json({ error: '記録するには、まず検証用の記録を始めてください。' }, 401)
     await env.DB.prepare('INSERT OR IGNORE INTO player_insects (user_id, world_day) VALUES (?, ?)')
       .bind(user.id, today.world_day).run()
