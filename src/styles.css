@@ -708,6 +708,25 @@ button {
   background: #29251f;
   animation: shore-walk 5s ease-in-out infinite alternate;
 }
+.map-shore-creature.shore-calm i { animation-duration: 8s; }
+.map-shore-creature.shore-wary i { animation: none; transform: translateX(15%); }
+
+.map-garden-visitor i:first-child {
+  left: 34%; top: 66%; width: 32%; height: 16%;
+  border-radius: 50%; background: #8d6650;
+  box-shadow: 0 4px 0 rgb(38 45 28 / 25%);
+  animation: visitor-peek 5s ease-in-out infinite alternate;
+}
+.map-garden-visitor i:nth-child(2) {
+  left: 55%; top: 60%; width: 15%; height: 16%;
+  border-radius: 50%; background: #a77c5b;
+  animation: visitor-peek 5s ease-in-out infinite alternate;
+}
+.map-garden-visitor i:nth-child(3) {
+  left: 62%; top: 64%; width: 3%; height: 3%;
+  border-radius: 50%; background: #31251f;
+  animation: visitor-peek 5s ease-in-out infinite alternate;
+}
 
 .map-fishing-rod i:first-child {
   left: 34%;
@@ -821,6 +840,17 @@ button {
 
 .map-insect-flowers i:nth-child(3) { opacity: 0; }
 .map-insect-flowers.flower-attracted i:nth-child(3) { opacity: 1; }
+.map-insect-flowers.flower-yellow i:nth-child(2) {
+  background: radial-gradient(circle at 50% 50%, #a77532 0 20%, #f7cf5d 22% 65%, transparent 67%);
+  box-shadow: -13px 10px 0 -6px #efbc42, 13px 8px 0 -6px #e7ce66;
+}
+.map-insect-flowers.flower-yellow i:nth-child(3) {
+  box-shadow: -5px -3px 0 -2px #efcf73, 4px -4px 0 -2px #eab544;
+}
+.map-insect-flowers.flower-white i:nth-child(3) {
+  box-shadow: -5px -3px 0 -2px #f5e9d0, 4px -4px 0 -2px #e5dacf;
+}
+.map-placed-reed i { animation: placed-reed-sway 4s ease-in-out infinite alternate; }
 
 @keyframes grass-breathe {
   from { transform: rotate(-5deg); }
@@ -850,6 +880,16 @@ button {
 @keyframes meadow-crawl {
   0%, 28% { transform: translateX(-24%); }
   72%, 100% { transform: translateX(40%); }
+}
+
+@keyframes visitor-peek {
+  0%, 35% { transform: translateX(-12%); }
+  70%, 100% { transform: translateX(16%); }
+}
+
+@keyframes placed-reed-sway {
+  from { transform: rotate(-5deg); }
+  to { transform: rotate(7deg); }
 }
 
 @keyframes shore-walk {
@@ -1019,13 +1059,15 @@ button:focus-visible { outline: 4px solid #fff2a8; outline-offset: 3px; }
 
 @media (prefers-reduced-motion: reduce) {
   .player { transition: none; }
-  .map-pond i, .map-pond .pond-deep-fish, .map-shore-creature i, .map-insect-grass i, .map-insect-meadow i, .map-insect-flowers i, .map-lantern::before { animation: none !important; }
+  .map-pond i, .map-pond .pond-deep-fish, .map-shore-creature i, .map-garden-visitor i, .map-insect-grass i, .map-insect-meadow i, .map-insect-flowers i, .map-placed-reed i, .map-lantern::before { animation: none !important; }
 }
 
 .capture-mode .map-pond i,
 .capture-mode .map-pond .pond-deep-fish,
 .capture-mode .map-shore-creature i,
+.capture-mode .map-garden-visitor i,
 .capture-mode .map-insect-grass i,
 .capture-mode .map-insect-meadow i,
 .capture-mode .map-insect-flowers i,
+.capture-mode .map-placed-reed i,
 .capture-mode .map-lantern::before { animation: none !important; }
