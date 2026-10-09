@@ -157,6 +157,7 @@ function App() {
   const [inventory, setInventory] = useState<{ key: string; label?: string; quantity: number; firstPickedDay: number }[]>([])
   const [inventoryStatus, setInventoryStatus] = useState('')
   const [fishingState, setFishingState] = useState<'idle' | 'cast' | 'caught'>('idle')
+  const [observedHabitats, setObservedHabitats] = useState<string[]>([])
   const [insectState, setInsectState] = useState<'free' | 'held'>('free')
   const [insectReleased, setInsectReleased] = useState(false)
   const [flowerTended, setFlowerTended] = useState(false)
@@ -309,15 +310,16 @@ function App() {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ target, x: position.x, y: position.y }),
-    }).then(async response => ({ response, result: await response.json() as { error?: string; message?: string; state?: 'idle' | 'cast' | 'caught' } }))
+    }).then(async response => ({ response, result: await response.json() as { error?: string; message?: string; state?: 'idle' | 'cast' | 'caught'; observedHabitat?: string } }))
       .then(({ response, result }) => {
         setMessage(response.ok ? (result.message ?? '水面に変化がありました。') : (result.error ?? '釣りを続けられません。'))
         if (response.ok && result.state) setFishingState(result.state)
+        if (response.ok && result.observedHabitat) setObservedHabitats(current => [...new Set([...current, result.observedHabitat!])])
       })
       .catch(() => setMessage('釣りの状態を記録できませんでした。'))
   }, [position, user])
 
-  const insectAction = useCallback((target: 'grass' | 'net' | 'flowers') => {
+  const insectAction = useCallback((target: 'grass' | 'meadow' | 'net' | 'flowers') => {
     fetch('/api/insects', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -371,6 +373,10 @@ function App() {
     }
     if (target?.key === 'insect-grass') {
       insectAction('grass')
+      return
+    }
+    if (target?.key === 'insect-meadow') {
+      insectAction('meadow')
       return
     }
     if (target?.key === 'insect-net') {
@@ -493,6 +499,7 @@ function App() {
     if (!user || !world || world.day < 8 || offline) return
     fetch('/api/fishing').then(response => response.ok ? response.json() : null).then(result => {
       if (result?.state) setFishingState(result.state)
+      if (result?.observedHabitats) setObservedHabitats(result.observedHabitats)
     }).catch(() => undefined)
   }, [user, world, offline])
 
@@ -573,7 +580,7 @@ function App() {
             return (
               <div
                 key={object.key}
-                className={`map-object ${object.sprite} ${object.flat ? 'is-flat' : ''} ${object.key === 'pond' && world.day >= 2 ? 'pond-awake' : ''} ${object.key === 'pond' && world.day >= 3 ? 'pond-fish' : ''} ${object.key === 'pond' && fishingState === 'cast' ? 'pond-cast' : ''} ${object.key === 'pond' && fishingState === 'caught' ? 'pond-caught' : ''} ${object.key === 'insect-grass' && insectState === 'held' ? 'bug-held' : ''} ${object.key === 'insect-flowers' && (flowerTended || insectReleased) ? 'flower-attracted' : ''}`}
+                className={`map-object ${object.sprite} ${object.flat ? 'is-flat' : ''} ${object.key === 'pond' && world.day >= 2 ? 'pond-awake' : ''} ${object.key === 'pond' && world.day >= 3 ? 'pond-fish' : ''} ${object.key === 'pond' && world.day >= 31 ? 'pond-shallows' : ''} ${object.key === 'pond' && world.day >= 32 ? 'pond-two-fish' : ''} ${object.key === 'pond' && world.day >= 34 ? 'pond-after-rain' : ''} ${object.key === 'pond' && fishingState === 'cast' ? 'pond-cast' : ''} ${object.key === 'pond' && fishingState === 'caught' ? 'pond-caught' : ''} ${object.key === 'insect-grass' && insectState === 'held' ? 'bug-held' : ''} ${object.key === 'insect-flowers' && (flowerTended || insectReleased) ? 'flower-attracted' : ''}`}
                 style={{
                   '--ux': ux,
                   '--uy': uy,
@@ -582,9 +589,10 @@ function App() {
                   zIndex: object.flat ? 3 : Math.round(uy * 100),
                 } as CSSProperties}
                 role="img"
-                aria-label={object.key === 'pond' && world.day >= 3 ? '魚影の泳ぐ池' : object.key === 'insect-flowers' && (flowerTended || insectReleased) ? '虫が集まる岸辺の花' : object.label}
+                aria-label={object.key === 'pond' && world.day >= 32 ? '浅瀬の細い魚影と深場の丸い魚影が泳ぐ池' : object.key === 'pond' && world.day >= 3 ? '魚影の泳ぐ池' : object.key === 'insect-flowers' && (flowerTended || insectReleased) ? '虫が集まる岸辺の花' : object.label}
               >
                 <i /><i /><i />
+                {object.key === 'pond' && world.day >= 32 && <span className="pond-deep-fish" aria-hidden="true" />}
                 {object.key === 'pond' && <span className="fishing-float" aria-hidden="true" />}
                 {object.kind === 'item' && <span className="map-item-label">{object.label}</span>}
               </div>
@@ -640,6 +648,8 @@ function App() {
             {!user ? <p>持ち物を見るには、記録を始めてください。</p> : inventory.length === 0
               ? <p className="small-text">まだ、手に持っているものはありません。</p>
               : <ul className="inventory-list">{inventory.map(item => <li key={item.key}><span>{item.label ?? item.key}</span><strong>×{item.quantity}</strong></li>)}</ul>}
+            {user && world && world.day >= 33 && <p className="small-text">池の観察記録: {observedHabitats.length
+              ? observedHabitats.map(key => key === 'shallow' ? '浅瀬' : '深場').join('・') : 'まだありません。池の両側から観察できます。'}</p>}
             {inventoryStatus && <p role="status">{inventoryStatus}</p>}
           </>}
           {panel === 'account' && <>
