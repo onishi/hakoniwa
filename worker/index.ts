@@ -47,6 +47,18 @@ const randomToken = () => {
   return btoa(String.fromCharCode(...bytes)).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '')
 }
 
+async function recordHabitatCare(env: Env, userId: number, worldDay: number) {
+  if (worldDay < 45) return false
+  const result = await env.DB.prepare(`INSERT OR REPLACE INTO player_habitat_care
+    (user_id, prepared_day, flower_color, garden_x, garden_y)
+    SELECT ?, ?, insects.flower_color, garden.x, garden.y
+    FROM player_insects AS insects JOIN player_garden_tiles AS garden ON garden.user_id = insects.user_id
+    WHERE insects.user_id = ? AND insects.flower_tended_day = ? AND garden.last_watered_day = ?
+      AND garden.status = 'watered' ORDER BY garden.updated_at DESC LIMIT 1`)
+    .bind(userId, worldDay, userId, worldDay, worldDay).run()
+  return Boolean(result.meta.changes)
+}
+
 const cookieValue = (request: Request, name: string) => {
   const part = request.headers.get('cookie')?.split(';').map(value => value.trim()).find(value => value.startsWith(`${name}=`))
   return part?.slice(name.length + 1)
@@ -163,8 +175,8 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
     const today = await publishedDay(env)
     if (!today || today.world_day < 8) return json({ state: 'idle', rodBorrowed: false })
     const [fishing, observed] = await Promise.all([
-      env.DB.prepare('SELECT rod_borrowed, state, world_day FROM player_fishing WHERE user_id = ?')
-        .bind(user.id).first<{ rod_borrowed: number; state: string; world_day: number }>(),
+      env.DB.prepare('SELECT rod_borrowed, state, world_day, last_release_habitat, bank_seen_day FROM player_fishing WHERE user_id = ?')
+        .bind(user.id).first<{ rod_borrowed: number; state: string; world_day: number; last_release_habitat: string | null; bank_seen_day: number | null }>(),
       today.world_day >= 33 ? env.DB.prepare('SELECT habitat_key FROM player_habitat_observations WHERE user_id = ?')
         .bind(user.id).all<{ habitat_key: string }>() : Promise.resolve({ results: [] as { habitat_key: string }[] }),
     ])
@@ -172,6 +184,8 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
       state: fishing?.world_day === today.world_day ? fishing.state : 'idle',
       rodBorrowed: Boolean(fishing?.rod_borrowed),
       observedHabitats: observed.results.map(row => row.habitat_key),
+      lastReleaseHabitat: today.world_day >= 44 ? fishing?.last_release_habitat ?? null : null,
+      bankSeen: today.world_day >= 43 && Boolean(fishing?.bank_seen_day),
     })
   }
 
@@ -212,6 +226,13 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
     const habitatName = habitat === 'shallow' ? '浅瀬' : '深場'
     const fishing = await env.DB.prepare('SELECT rod_borrowed, state FROM player_fishing WHERE user_id = ?')
       .bind(user.id).first<{ rod_borrowed: number; state: 'idle' | 'cast' | 'caught' }>()
+    if (fishing?.state === 'idle' && today.world_day >= 43 && x >= target.x + target.width && y >= target.y && y < target.y + target.height) {
+      const bank = await env.DB.prepare(`UPDATE player_fishing SET bank_seen_day = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE user_id = ? AND bank_seen_day IS NULL RETURNING bank_seen_day`)
+        .bind(today.world_day, user.id).first()
+      if (bank) return json({ state: 'idle', bankSeen: true,
+        message: '池の東の縁で、細く角ばった三つ目の魚影を見つけました。ほかの二匹と通り道が違います。' })
+    }
     if (fishing?.state === 'idle' && today.world_day >= 33) {
       const observation = await env.DB.prepare(`INSERT OR IGNORE INTO player_habitat_observations
         (user_id, habitat_key, first_day) VALUES (?, ?, ?)`).bind(user.id, habitat, today.world_day).run()
@@ -242,10 +263,15 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
       return json({ state: 'caught', message: '小さな魚が釣れました。池へ向けてもう一度アクションすると戻せます。' })
     }
     const changed = await env.DB.prepare(`UPDATE player_fishing SET state = 'idle', released_count = released_count + 1,
+      last_release_habitat = CASE WHEN ? >= 44 THEN ? ELSE last_release_habitat END,
       updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND state = 'caught' RETURNING released_count`)
-      .bind(user.id).first<{ released_count: number }>()
+      .bind(today.world_day, habitat, user.id).first<{ released_count: number }>()
     if (!changed) return json({ error: 'もう一度、池を見てください。' }, 409)
-    return json({ state: 'idle', releasedCount: changed.released_count, message: '魚を池へ戻しました。魚影がゆっくり泳ぎ去ります。' })
+    return json({ state: 'idle', releasedCount: changed.released_count,
+      lastReleaseHabitat: today.world_day >= 44 ? habitat : null,
+      message: today.world_day >= 44
+        ? `${habitatName}から魚を池へ戻しました。この岸の放流を観察記録に残しました。魚影が泳ぎ去ります。`
+        : '魚を池へ戻しました。魚影がゆっくり泳ぎ去ります。' })
   }
 
   if (url.pathname === '/api/insects' && request.method === 'GET') {
@@ -263,6 +289,21 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
     })
   }
 
+  if (url.pathname === '/api/habitat-care' && request.method === 'GET') {
+    const user = await currentUser(request, env)
+    if (!user) return json({ care: null })
+    const today = await publishedDay(env)
+    if (!today || today.world_day < 45) return json({ care: null })
+    const care = await env.DB.prepare(`SELECT prepared_day, flower_color, garden_x, garden_y
+      FROM player_habitat_care WHERE user_id = ? AND prepared_day <= ?
+      ORDER BY prepared_day DESC LIMIT 1`).bind(user.id, today.world_day)
+      .first<{ prepared_day: number; flower_color: string; garden_x: number; garden_y: number }>()
+    return json({ care: care ? {
+      preparedDay: care.prepared_day, flowerColor: care.flower_color,
+      garden: { x: care.garden_x, y: care.garden_y }, revisited: today.world_day > care.prepared_day,
+    } : null })
+  }
+
   if (url.pathname === '/api/insects' && request.method === 'POST') {
     if (request.headers.get('origin') !== url.origin) return json({ error: 'このページから操作してください。' }, 403)
     const today = await publishedDay(env)
@@ -276,6 +317,7 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
     }
     const key = input.target === 'grass' ? 'insect-grass'
       : input.target === 'meadow' ? 'insect-meadow'
+      : input.target === 'striped' ? 'insect-striped'
       : input.target === 'net' ? 'insect-net'
         : input.target === 'flowers' ? 'insect-flowers' : null
     if (!key) return json({ error: '場所を選んでください。' }, 400)
@@ -289,6 +331,10 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
 
     const user = await currentUser(request, env)
     if (!user && key === 'insect-grass') return json({ state: 'free', message: '草むらの虫が葉の間を行き来しています。' })
+    if (key === 'insect-striped') {
+      if (today.world_day < 41) return json({ error: 'まだ縞の虫はいません。' }, 409)
+      return json({ message: '東の草地で、縞のある虫が葉の下を折り返して歩いています。岸辺の虫とは姿も速さも違います。' })
+    }
     if (key === 'insect-meadow') {
       if (today.world_day < 35) return json({ error: 'まだ歩く虫はいません。' }, 409)
       if (user) {
@@ -339,12 +385,15 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
     if (today.world_day >= 36) {
       const changed = await env.DB.prepare(`UPDATE player_insects SET flower_tended = 1,
         flower_color = CASE flower_color WHEN 'white' THEN 'yellow' ELSE 'white' END,
+        flower_tended_day = CASE WHEN ? >= 45 THEN ? ELSE flower_tended_day END,
         updated_at = CURRENT_TIMESTAMP WHERE user_id = ? RETURNING flower_color`)
-        .bind(user.id).first<{ flower_color: string }>()
+        .bind(today.world_day, today.world_day, user.id).first<{ flower_color: string }>()
+      const careReady = await recordHabitatCare(env, user.id, today.world_day)
       return json({ state: 'free', flowerTended: true, flowerColor: changed?.flower_color,
-        message: changed?.flower_color === 'yellow'
+        message: (changed?.flower_color === 'yellow'
           ? '花を黄色に整えました。明るい羽の虫が寄ってきます。もう一度で白い花にできます。'
-          : '花を白色に整えました。淡い羽の虫が寄ってきます。もう一度で黄色い花にできます。' })
+          : '花を白色に整えました。淡い羽の虫が寄ってきます。もう一度で黄色い花にできます。')
+          + (careReady ? ' 水をやった庭とともに、次の訪問の準備が残りました。' : '') })
     }
     await env.DB.prepare('UPDATE player_insects SET flower_tended = 1, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?')
       .bind(user.id).run()
@@ -522,7 +571,9 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
     if (tile.status === 'planted' && today.world_day >= 19) {
       await env.DB.prepare(`UPDATE player_garden_tiles SET status = 'watered', last_watered_day = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND x = ? AND y = ?`)
         .bind(today.world_day, user.id, x, y).run()
-      return json({ ok: true, state: 'watered', message: '水をやりました。少し待つと芽が育ちます。' })
+      const careReady = await recordHabitatCare(env, user.id, today.world_day)
+      return json({ ok: true, state: 'watered', message: '水をやりました。少し待つと芽が育ちます。'
+        + (careReady ? ' 花の手入れとともに、次の訪問の準備が残りました。' : '') })
     }
     if (tile.status === 'watered' && today.world_day >= 20 && tile.updated_at <= new Date(Date.now() - 90_000).toISOString().replace('T', ' ').slice(0, 19)) {
       await env.DB.prepare(`UPDATE player_garden_tiles SET status = 'tilled', seed_key = NULL, planted_day = NULL, last_watered_day = NULL, updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND x = ? AND y = ?`)
@@ -693,7 +744,7 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
     const size = mapSize(today.world_day)
 
     // Everything is pinned to the published day, so one visit never mixes two days together.
-    const [entities, tiles, picked, traces, gardenTiles, decorations] = await Promise.all([
+    const [entities, tiles, picked, traces, gardenTiles, decorations, flower, priorCare] = await Promise.all([
       env.DB.prepare(`SELECT entity_key AS key, kind, x, y, width, height, sprite, label, message, panel, flat, blocks
         FROM world_entities WHERE born_day <= ?1 AND (gone_day IS NULL OR gone_day > ?1) ORDER BY y, x`)
         .bind(today.world_day).all<Record<string, unknown>>(),
@@ -710,6 +761,12 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
       viewer && today.world_day >= 29 ? env.DB.prepare('SELECT item_key, x, y FROM player_decorations WHERE user_id = ? AND world_day <= ?')
         .bind(viewer.id, today.world_day).all<{ item_key: string; x: number; y: number }>()
         : Promise.resolve({ results: [] as { item_key: string; x: number; y: number }[] }),
+      viewer && today.world_day >= 42 ? env.DB.prepare('SELECT flower_tended, flower_color FROM player_insects WHERE user_id = ?')
+        .bind(viewer.id).first<{ flower_tended: number; flower_color: string }>() : Promise.resolve(null),
+      viewer && today.world_day >= 46 ? env.DB.prepare(`SELECT prepared_day, flower_color, garden_x, garden_y
+        FROM player_habitat_care WHERE user_id = ? AND prepared_day < ?
+        ORDER BY prepared_day DESC LIMIT 1`).bind(viewer.id, today.world_day)
+        .first<{ prepared_day: number; flower_color: string; garden_x: number; garden_y: number }>() : Promise.resolve(null),
     ])
     const pickedKeys = new Set(picked.results.map(item => item.item_key))
     const traceEntities = traces.results.map(trace => ({
@@ -728,10 +785,19 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
     }))
     const tendedTile = viewer && today.world_day >= 37
       ? gardenTiles.results.find(row => row.kind === 'watered' || row.kind === 'grown') : null
-    const gardenVisitor = tendedTile ? [{
-      key: 'garden-visitor', kind: 'creature', x: Number(tendedTile.x), y: Number(tendedTile.y),
-      width: 1, height: 1, sprite: 'map-garden-visitor', label: '庭の小さな訪問者',
-      message: '水をやった庭に、小さな生き物が来ています。あなたの世話した場所を選んだようです。',
+    const visitorTile = priorCare ? { x: priorCare.garden_x, y: priorCare.garden_y } : tendedTile
+    const gardenVisitor = visitorTile ? [{
+      key: 'garden-visitor', kind: 'creature', x: Number(visitorTile.x), y: Number(visitorTile.y),
+      width: 1, height: 1, sprite: priorCare ? 'map-garden-visitor care-return' : 'map-garden-visitor', label: '庭の小さな訪問者',
+      message: priorCare
+        ? `DAY ${priorCare.prepared_day} に整えた${priorCare.flower_color === 'yellow' ? '黄色' : '白色'}の花と水を覚えて、小さな生き物が庭へ戻ってきました。`
+        : '水をやった庭に、小さな生き物が来ています。あなたの世話した場所を選んだようです。',
+      panel: null, flat: false, blocks: false,
+    }] : []
+    const fruitVisitor = flower?.flower_tended ? [{
+      key: 'fruit-visitor', kind: 'creature', x: 4, y: 4, width: 1, height: 1,
+      sprite: 'map-fruit-visitor', label: '果樹に来た虫',
+      message: `${flower.flower_color === 'yellow' ? '黄色' : '白色'}の花を整えたあと、果樹に小さな虫が来ました。花と実の間を行き来しています。`,
       panel: null, flat: false, blocks: false,
     }] : []
 
@@ -743,7 +809,7 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
         ...row,
         flat: Boolean(row.flat),
         blocks: Boolean(row.blocks),
-      })), ...traceEntities, ...decorationEntities, ...gardenVisitor],
+      })), ...traceEntities, ...decorationEntities, ...gardenVisitor, ...fruitVisitor],
       tiles: [...tiles.results, ...gardenTiles.results],
     })
   }
