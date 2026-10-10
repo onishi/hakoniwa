@@ -659,6 +659,15 @@ button {
 .map-pond.pond-caught .pond-deep-fish { opacity: .3; }
 .map-pond.pond-after-rain i:first-child { left: 61%; top: 53%; animation-duration: 2.4s; }
 .map-pond.pond-after-rain .pond-deep-fish { left: 49%; top: 54%; }
+.map-pond .pond-bank-fish { display: none; }
+.map-pond.pond-third-fish .pond-bank-fish {
+  display: block; position: absolute; z-index: 2;
+  left: 64%; top: 39%; width: 10%; height: 5%;
+  clip-path: polygon(0 50%, 20% 0, 82% 14%, 100% 50%, 82% 86%, 20% 100%);
+  background: #997b4f;
+  animation: bank-fish-route 6.2s ease-in-out infinite alternate;
+}
+.map-pond.pond-caught .pond-bank-fish { opacity: .3; }
 
 .map-pond .fishing-float {
   display: none;
@@ -727,6 +736,23 @@ button {
   border-radius: 50%; background: #31251f;
   animation: visitor-peek 5s ease-in-out infinite alternate;
 }
+.map-garden-visitor.care-return i:first-child { background: #ae8354; }
+.map-garden-visitor.care-return i:nth-child(2) { background: #cfac70; }
+.map-fruit-visitor i:first-child {
+  left: 20%; top: 68%; width: 60%; height: 16%;
+  border-radius: 50%; background: #5c844e;
+}
+.map-fruit-visitor i:nth-child(2) {
+  left: 45%; top: 47%; width: 15%; height: 13%;
+  border-radius: 50%; background: #625038;
+  box-shadow: -6px -3px 0 -2px #f0d29a, 6px -3px 0 -2px #e8c989;
+  animation: fruit-visit 3.6s ease-in-out infinite alternate;
+}
+.map-fruit-visitor i:nth-child(3) {
+  left: 57%; top: 50%; width: 3%; height: 3%;
+  border-radius: 50%; background: #27231d;
+  animation: fruit-visit 3.6s ease-in-out infinite alternate;
+}
 
 .map-fishing-rod i:first-child {
   left: 34%;
@@ -794,6 +820,21 @@ button {
   border-radius: 50%; background: #604633;
   box-shadow: -4px 1px 0 -2px #352d25, 4px 1px 0 -2px #352d25;
   animation: meadow-crawl 5.4s ease-in-out infinite alternate;
+}
+.map-striped-beetle i:first-child {
+  left: 15%; top: 68%; width: 70%; height: 14%;
+  border-radius: 50%; background: #487a4a;
+}
+.map-striped-beetle i:nth-child(2) {
+  left: 25%; top: 39%; width: 52%; height: 34%;
+  clip-path: polygon(0 100%, 18% 16%, 38% 82%, 59% 8%, 78% 76%, 100% 100%);
+  background: #82ac62;
+}
+.map-striped-beetle i:nth-child(3) {
+  left: 40%; top: 64%; width: 20%; height: 12%;
+  border-radius: 45%; background: repeating-linear-gradient(90deg, #ad7750 0 4px, #3d352d 4px 7px);
+  box-shadow: 0 3px 0 rgb(35 39 27 / 26%);
+  animation: striped-walk 4.2s steps(4, end) infinite alternate;
 }
 
 .map-insect-grass.bug-held i:nth-child(3) { opacity: 0; }
@@ -890,6 +931,21 @@ button {
 @keyframes placed-reed-sway {
   from { transform: rotate(-5deg); }
   to { transform: rotate(7deg); }
+}
+
+@keyframes fruit-visit {
+  from { transform: translate(-18%, 12%); }
+  to { transform: translate(24%, -20%); }
+}
+
+@keyframes striped-walk {
+  from { transform: translateX(-30%); }
+  to { transform: translateX(34%); }
+}
+
+@keyframes bank-fish-route {
+  0%, 25% { transform: translate(-18%, -10%) rotate(-8deg); }
+  70%, 100% { transform: translate(24%, 34%) rotate(16deg); }
 }
 
 @keyframes shore-walk {
@@ -1059,15 +1115,18 @@ button:focus-visible { outline: 4px solid #fff2a8; outline-offset: 3px; }
 
 @media (prefers-reduced-motion: reduce) {
   .player { transition: none; }
-  .map-pond i, .map-pond .pond-deep-fish, .map-shore-creature i, .map-garden-visitor i, .map-insect-grass i, .map-insect-meadow i, .map-insect-flowers i, .map-placed-reed i, .map-lantern::before { animation: none !important; }
+  .map-pond i, .map-pond .pond-deep-fish, .map-pond .pond-bank-fish, .map-shore-creature i, .map-garden-visitor i, .map-fruit-visitor i, .map-insect-grass i, .map-insect-meadow i, .map-striped-beetle i, .map-insect-flowers i, .map-placed-reed i, .map-lantern::before { animation: none !important; }
 }
 
 .capture-mode .map-pond i,
 .capture-mode .map-pond .pond-deep-fish,
+.capture-mode .map-pond .pond-bank-fish,
 .capture-mode .map-shore-creature i,
 .capture-mode .map-garden-visitor i,
+.capture-mode .map-fruit-visitor i,
 .capture-mode .map-insect-grass i,
 .capture-mode .map-insect-meadow i,
+.capture-mode .map-striped-beetle i,
 .capture-mode .map-insect-flowers i,
 .capture-mode .map-placed-reed i,
 .capture-mode .map-lantern::before { animation: none !important; }

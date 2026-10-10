@@ -7,6 +7,7 @@ type Panel = 'diary' | 'wish' | 'account' | 'inventory' | null
 type DiaryEntry = { worldDay: number; body: string | null; screenshotUrl: string | null }
 type SessionUser = { name: string; avatarUrl: string | null }
 type AppMode = 'production' | 'day1' | 'evolution'
+type HabitatCare = { preparedDay: number; flowerColor: 'white' | 'yellow'; revisited: boolean }
 
 type WorldObject = {
   key: string
@@ -158,6 +159,9 @@ function App() {
   const [inventoryStatus, setInventoryStatus] = useState('')
   const [fishingState, setFishingState] = useState<'idle' | 'cast' | 'caught'>('idle')
   const [observedHabitats, setObservedHabitats] = useState<string[]>([])
+  const [lastReleaseHabitat, setLastReleaseHabitat] = useState<string | null>(null)
+  const [bankSeen, setBankSeen] = useState(false)
+  const [habitatCare, setHabitatCare] = useState<HabitatCare | null>(null)
   const [insectState, setInsectState] = useState<'free' | 'held'>('free')
   const [insectReleased, setInsectReleased] = useState(false)
   const [flowerTended, setFlowerTended] = useState(false)
@@ -168,6 +172,11 @@ function App() {
   const lastKeyboardMove = useRef(0)
   const playerRef = useRef<HTMLDivElement | null>(null)
   const captureMode = new URLSearchParams(location.search).has('capture')
+
+  const refreshHabitatCare = useCallback(() => {
+    fetch('/api/habitat-care').then(response => response.ok ? response.json() : null)
+      .then(data => setHabitatCare(data?.care ?? null)).catch(() => undefined)
+  }, [])
 
   const move = useCallback((nextDirection: Direction) => {
     if (!world) return
@@ -272,9 +281,10 @@ function App() {
           if (data?.items) setInventory(data.items)
         }).catch(() => undefined)
         if (result.state === 'watered') window.setTimeout(refreshWorld, 91_000)
+        if (world.day >= 45) refreshHabitatCare()
       }).catch(() => setMessage('庭の状態を記録できませんでした。'))
     return true
-  }, [position, user, world])
+  }, [position, refreshHabitatCare, user, world])
 
   const performTool = useCallback((target: WorldObject) => {
     fetch('/api/tool-action', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key: target.key, x: position.x, y: position.y }) })
@@ -314,16 +324,18 @@ function App() {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ target, x: position.x, y: position.y }),
-    }).then(async response => ({ response, result: await response.json() as { error?: string; message?: string; state?: 'idle' | 'cast' | 'caught'; observedHabitat?: string } }))
+    }).then(async response => ({ response, result: await response.json() as { error?: string; message?: string; state?: 'idle' | 'cast' | 'caught'; observedHabitat?: string; lastReleaseHabitat?: string; bankSeen?: boolean } }))
       .then(({ response, result }) => {
         setMessage(response.ok ? (result.message ?? '水面に変化がありました。') : (result.error ?? '釣りを続けられません。'))
         if (response.ok && result.state) setFishingState(result.state)
         if (response.ok && result.observedHabitat) setObservedHabitats(current => [...new Set([...current, result.observedHabitat!])])
+        if (response.ok && result.lastReleaseHabitat) setLastReleaseHabitat(result.lastReleaseHabitat)
+        if (response.ok && result.bankSeen !== undefined) setBankSeen(result.bankSeen)
       })
       .catch(() => setMessage('釣りの状態を記録できませんでした。'))
   }, [position, user])
 
-  const insectAction = useCallback((target: 'grass' | 'meadow' | 'net' | 'flowers') => {
+  const insectAction = useCallback((target: 'grass' | 'meadow' | 'striped' | 'net' | 'flowers') => {
     fetch('/api/insects', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -336,8 +348,9 @@ function App() {
       if (response.ok && result.released !== undefined) setInsectReleased(result.released)
       if (response.ok && result.flowerTended !== undefined) setFlowerTended(result.flowerTended)
       if (response.ok && result.flowerColor) setFlowerColor(result.flowerColor)
+      if (response.ok && target === 'flowers' && world && world.day >= 45) refreshHabitatCare()
     }).catch(() => setMessage('虫の状態を記録できませんでした。'))
-  }, [position])
+  }, [position, refreshHabitatCare, world])
 
   const shoreAction = useCallback(() => {
     fetch('/api/shore-observe', { method: 'POST', headers: { 'content-type': 'application/json' },
@@ -372,6 +385,10 @@ function App() {
       else setMessage(target.message)
       return
     }
+    if (target?.key === 'fruit-visitor') {
+      setMessage(target.message)
+      return
+    }
     if (target?.key === 'shore-creature' && world.day >= 39) {
       shoreAction()
       return
@@ -399,6 +416,10 @@ function App() {
     }
     if (target?.key === 'insect-meadow') {
       insectAction('meadow')
+      return
+    }
+    if (target?.key === 'insect-striped') {
+      insectAction('striped')
       return
     }
     if (target?.key === 'insect-net') {
@@ -523,8 +544,15 @@ function App() {
     fetch('/api/fishing').then(response => response.ok ? response.json() : null).then(result => {
       if (result?.state) setFishingState(result.state)
       if (result?.observedHabitats) setObservedHabitats(result.observedHabitats)
+      if (result?.lastReleaseHabitat) setLastReleaseHabitat(result.lastReleaseHabitat)
+      if (result?.bankSeen !== undefined) setBankSeen(result.bankSeen)
     }).catch(() => undefined)
   }, [user, world, offline])
+
+  useEffect(() => {
+    if (!user || !world || world.day < 45 || offline) return
+    refreshHabitatCare()
+  }, [user, world, offline, refreshHabitatCare])
 
   useEffect(() => {
     if (!user || !world || world.day < 12 || offline) return
@@ -604,7 +632,7 @@ function App() {
             return (
               <div
                 key={object.key}
-                className={`map-object ${object.sprite} ${object.flat ? 'is-flat' : ''} ${object.key === 'pond' && world.day >= 2 ? 'pond-awake' : ''} ${object.key === 'pond' && world.day >= 3 ? 'pond-fish' : ''} ${object.key === 'pond' && world.day >= 31 ? 'pond-shallows' : ''} ${object.key === 'pond' && world.day >= 32 ? 'pond-two-fish' : ''} ${object.key === 'pond' && world.day >= 34 ? 'pond-after-rain' : ''} ${object.key === 'pond' && fishingState === 'cast' ? 'pond-cast' : ''} ${object.key === 'pond' && fishingState === 'caught' ? 'pond-caught' : ''} ${object.key === 'insect-grass' && insectState === 'held' ? 'bug-held' : ''} ${object.key === 'insect-flowers' && (flowerTended || insectReleased) ? 'flower-attracted' : ''} ${object.key === 'insect-flowers' && world.day >= 36 ? `flower-${flowerColor}` : ''} ${object.key === 'shore-creature' && world.day >= 39 && Math.abs(position.x - object.x) + Math.abs(position.y - object.y) <= 1 ? position.y < object.y ? 'shore-calm' : 'shore-wary' : ''}`}
+                className={`map-object ${object.sprite} ${object.flat ? 'is-flat' : ''} ${object.key === 'pond' && world.day >= 2 ? 'pond-awake' : ''} ${object.key === 'pond' && world.day >= 3 ? 'pond-fish' : ''} ${object.key === 'pond' && world.day >= 31 ? 'pond-shallows' : ''} ${object.key === 'pond' && world.day >= 32 ? 'pond-two-fish' : ''} ${object.key === 'pond' && world.day >= 34 ? 'pond-after-rain' : ''} ${object.key === 'pond' && world.day >= 43 ? 'pond-third-fish' : ''} ${object.key === 'pond' && fishingState === 'cast' ? 'pond-cast' : ''} ${object.key === 'pond' && fishingState === 'caught' ? 'pond-caught' : ''} ${object.key === 'insect-grass' && insectState === 'held' ? 'bug-held' : ''} ${object.key === 'insect-flowers' && (flowerTended || insectReleased) ? 'flower-attracted' : ''} ${object.key === 'insect-flowers' && world.day >= 36 ? `flower-${flowerColor}` : ''} ${object.key === 'shore-creature' && world.day >= 39 && Math.abs(position.x - object.x) + Math.abs(position.y - object.y) <= 1 ? position.y < object.y ? 'shore-calm' : 'shore-wary' : ''}`}
                 style={{
                   '--ux': ux,
                   '--uy': uy,
@@ -613,10 +641,11 @@ function App() {
                   zIndex: object.flat ? 3 : Math.round(uy * 100),
                 } as CSSProperties}
                 role="img"
-                aria-label={object.key === 'pond' && world.day >= 32 ? '浅瀬の細い魚影と深場の丸い魚影が泳ぐ池' : object.key === 'pond' && world.day >= 3 ? '魚影の泳ぐ池' : object.key === 'insect-flowers' && (flowerTended || insectReleased) ? '虫が集まる岸辺の花' : object.label}
+                aria-label={object.key === 'pond' && world.day >= 43 ? '浅瀬、深場、池の縁に三つの魚影が泳ぐ池' : object.key === 'pond' && world.day >= 32 ? '浅瀬の細い魚影と深場の丸い魚影が泳ぐ池' : object.key === 'pond' && world.day >= 3 ? '魚影の泳ぐ池' : object.key === 'insect-flowers' && (flowerTended || insectReleased) ? '虫が集まる岸辺の花' : object.label}
               >
                 <i /><i /><i />
                 {object.key === 'pond' && world.day >= 32 && <span className="pond-deep-fish" aria-hidden="true" />}
+                {object.key === 'pond' && world.day >= 43 && <span className="pond-bank-fish" aria-hidden="true" />}
                 {object.key === 'pond' && <span className="fishing-float" aria-hidden="true" />}
                 {object.kind === 'item' && <span className="map-item-label">{object.label}</span>}
               </div>
@@ -674,6 +703,9 @@ function App() {
               : <ul className="inventory-list">{inventory.map(item => <li key={item.key}><span>{item.label ?? item.key}</span><strong>×{item.quantity}</strong></li>)}</ul>}
             {user && world && world.day >= 33 && <p className="small-text">池の観察記録: {observedHabitats.length
               ? observedHabitats.map(key => key === 'shallow' ? '浅瀬' : '深場').join('・') : 'まだありません。池の両側から観察できます。'}</p>}
+            {user && world && world.day >= 44 && lastReleaseHabitat && <p className="small-text">最後に魚を戻した場所: {lastReleaseHabitat === 'shallow' ? '浅瀬' : '深場'}</p>}
+            {user && world && world.day >= 43 && bankSeen && <p className="small-text">池の東の縁で、三つ目の魚影を見つけました。</p>}
+            {user && world && world.day >= 45 && habitatCare && <p className="small-text">花と水の記録: DAY {habitatCare.preparedDay} に{habitatCare.flowerColor === 'yellow' ? '黄色' : '白色'}の花と庭を整えました。{habitatCare.revisited ? '次の訪問の気配が残っています。' : '次の訪問を待っています。'}</p>}
             {inventoryStatus && <p role="status">{inventoryStatus}</p>}
           </>}
           {panel === 'account' && <>
