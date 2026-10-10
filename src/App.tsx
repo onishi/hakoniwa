@@ -2,7 +2,14 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from 're
 
 type Position = { x: number; y: number }
 type Direction = 'up' | 'down' | 'left' | 'right'
-type Panel = 'diary' | 'wish' | 'account' | 'inventory' | null
+type Panel = 'diary' | 'wish' | 'account' | 'inventory' | 'choices' | null
+type Activity = 'fishing' | 'garden' | 'gathering' | 'observation'
+const activities: { key: Activity; label: string; hint: string }[] = [
+  { key: 'fishing', label: '釣り', hint: '池で竿を借り、魚を釣って戻す' },
+  { key: 'garden', label: '庭', hint: '土を耕し、種を植えて水をやる' },
+  { key: 'gathering', label: '採集', hint: '果樹や資源のそばで素材を集める' },
+  { key: 'observation', label: '観察', hint: '池と東の泉で生き物の違いを見る' },
+]
 /** A day the god stayed silent still has an entry; its body is simply missing. */
 type DiaryEntry = { worldDay: number; body: string | null; screenshotUrl: string | null }
 type SessionUser = { name: string; avatarUrl: string | null }
@@ -162,6 +169,11 @@ function App() {
   const [lastReleaseHabitat, setLastReleaseHabitat] = useState<string | null>(null)
   const [bankSeen, setBankSeen] = useState(false)
   const [habitatCare, setHabitatCare] = useState<HabitatCare | null>(null)
+  const [dayPhase, setDayPhase] = useState<'morning' | 'evening'>(() => new Date().getHours() >= 17 ? 'evening' : 'morning')
+  const [activity, setActivity] = useState<Activity | null>(null)
+  const [activityComplete, setActivityComplete] = useState(false)
+  const [eastSeen, setEastSeen] = useState(false)
+  const [watersCompared, setWatersCompared] = useState(false)
   const [insectState, setInsectState] = useState<'free' | 'held'>('free')
   const [insectReleased, setInsectReleased] = useState(false)
   const [flowerTended, setFlowerTended] = useState(false)
@@ -177,6 +189,10 @@ function App() {
     fetch('/api/habitat-care').then(response => response.ok ? response.json() : null)
       .then(data => setHabitatCare(data?.care ?? null)).catch(() => undefined)
   }, [])
+
+  const completeActivity = useCallback((kind: Activity) => {
+    if (activity === kind) setActivityComplete(true)
+  }, [activity])
 
   const move = useCallback((nextDirection: Direction) => {
     if (!world) return
@@ -273,6 +289,7 @@ function App() {
       .then(({ response, result }) => {
         setMessage(response.ok ? (result.message ?? '庭に変化がありました。') : (result.error ?? '庭では何も起きませんでした。'))
         if (!response.ok) return
+        completeActivity('garden')
         const refreshWorld = () => fetch('/api/world').then(worldResponse => worldResponse.ok ? worldResponse.json() : null).then(data => {
           if (data) setWorld(buildWorld(data))
         }).catch(() => undefined)
@@ -284,26 +301,32 @@ function App() {
         if (world.day >= 45) refreshHabitatCare()
       }).catch(() => setMessage('庭の状態を記録できませんでした。'))
     return true
-  }, [position, refreshHabitatCare, user, world])
+  }, [completeActivity, position, refreshHabitatCare, user, world])
 
   const performTool = useCallback((target: WorldObject) => {
     fetch('/api/tool-action', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key: target.key, x: position.x, y: position.y }) })
       .then(async response => ({ response, result: await response.json() as { error?: string; message?: string } }))
       .then(({ response, result }) => {
         setMessage(response.ok ? (result.message ?? '素材を取り出しました。') : (result.error ?? '道具を使えません。'))
-        if (response.ok) fetch('/api/inventory').then(inventoryResponse => inventoryResponse.ok ? inventoryResponse.json() : null).then(data => data?.items && setInventory(data.items)).catch(() => undefined)
+        if (response.ok) {
+          completeActivity('gathering')
+          fetch('/api/inventory').then(inventoryResponse => inventoryResponse.ok ? inventoryResponse.json() : null).then(data => data?.items && setInventory(data.items)).catch(() => undefined)
+        }
       })
       .catch(() => setMessage('道具の操作を記録できませんでした。'))
-  }, [position])
+  }, [completeActivity, position])
 
   const harvestSource = useCallback((target: WorldObject) => {
     fetch('/api/source-action', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key: target.key, x: position.x, y: position.y }) })
       .then(async response => ({ response, result: await response.json() as { error?: string; message?: string } }))
       .then(({ response, result }) => {
         setMessage(response.ok ? (result.message ?? '実りを採りました。') : (result.error ?? 'そこからは採れません。'))
-        if (response.ok) fetch('/api/inventory').then(inventoryResponse => inventoryResponse.ok ? inventoryResponse.json() : null).then(data => data?.items && setInventory(data.items)).catch(() => undefined)
+        if (response.ok) {
+          completeActivity('gathering')
+          fetch('/api/inventory').then(inventoryResponse => inventoryResponse.ok ? inventoryResponse.json() : null).then(data => data?.items && setInventory(data.items)).catch(() => undefined)
+        }
       }).catch(() => setMessage('採取を記録できませんでした。'))
-  }, [position])
+  }, [completeActivity, position])
 
   const craft = useCallback(() => {
     fetch('/api/craft', { method: 'POST', headers: { 'content-type': 'application/json' },
@@ -324,16 +347,30 @@ function App() {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ target, x: position.x, y: position.y }),
-    }).then(async response => ({ response, result: await response.json() as { error?: string; message?: string; state?: 'idle' | 'cast' | 'caught'; observedHabitat?: string; lastReleaseHabitat?: string; bankSeen?: boolean } }))
+    }).then(async response => ({ response, result: await response.json() as { error?: string; message?: string; state?: 'idle' | 'cast' | 'caught'; observedHabitat?: string; lastReleaseHabitat?: string; bankSeen?: boolean; releasedCount?: number; comparedWaters?: boolean } }))
       .then(({ response, result }) => {
         setMessage(response.ok ? (result.message ?? '水面に変化がありました。') : (result.error ?? '釣りを続けられません。'))
         if (response.ok && result.state) setFishingState(result.state)
         if (response.ok && result.observedHabitat) setObservedHabitats(current => [...new Set([...current, result.observedHabitat!])])
         if (response.ok && result.lastReleaseHabitat) setLastReleaseHabitat(result.lastReleaseHabitat)
         if (response.ok && result.bankSeen !== undefined) setBankSeen(result.bankSeen)
+        if (response.ok && result.releasedCount) completeActivity('fishing')
+        if (response.ok && (result.observedHabitat || result.comparedWaters)) completeActivity('observation')
+        if (response.ok && result.comparedWaters) setWatersCompared(true)
       })
       .catch(() => setMessage('釣りの状態を記録できませんでした。'))
-  }, [position, user])
+  }, [completeActivity, position, user])
+
+  const observeSpring = useCallback(() => {
+    fetch('/api/east-spring', { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ x: position.x, y: position.y }) })
+      .then(async response => ({ response, result: await response.json() as { error?: string; message?: string; seen?: boolean; compared?: boolean } }))
+      .then(({ response, result }) => {
+        setMessage(response.ok ? result.message ?? '' : result.error ?? '泉の様子がわかりません。')
+        if (response.ok && result.seen) { setEastSeen(true); completeActivity('observation') }
+        if (response.ok && result.compared) setWatersCompared(true)
+      }).catch(() => setMessage('泉の様子を記録できませんでした。'))
+  }, [completeActivity, position])
 
   const insectAction = useCallback((target: 'grass' | 'meadow' | 'striped' | 'net' | 'flowers') => {
     fetch('/api/insects', {
@@ -393,6 +430,10 @@ function App() {
       shoreAction()
       return
     }
+    if (target?.key === 'east-spring' && world.day >= 48) {
+      observeSpring()
+      return
+    }
     if (target?.kind === 'resource') {
       if (world.day >= 25) performTool(target)
       else setMessage(target.message)
@@ -450,7 +491,7 @@ function App() {
       ? '池の中を小さな魚影が泳いでいます。'
       : target?.message ?? '柔らかな土です。けれど、植えるものはまだありません。')
     if (target?.panel) setPanel(target.panel)
-  }, [craft, direction, fishingAction, gardenAction, harvestSource, insectAction, inventory, performTool, pickUp, placeItem, position, reclaimTrace, shoreAction, world])
+  }, [craft, direction, fishingAction, gardenAction, harvestSource, insectAction, inventory, observeSpring, performTool, pickUp, placeItem, position, reclaimTrace, shoreAction, world])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -465,7 +506,7 @@ function App() {
         if (event.repeat && now - lastKeyboardMove.current < 180) return
         lastKeyboardMove.current = now
         move(nextDirection)
-      } else if (event.code === 'Space' && !event.repeat) {
+      } else if (event.code === 'Space' && !event.repeat && !(event.target instanceof HTMLElement && event.target.closest('button, input, textarea, a'))) {
         event.preventDefault()
         act()
       }
@@ -555,6 +596,14 @@ function App() {
   }, [user, world, offline, refreshHabitatCare])
 
   useEffect(() => {
+    if (!user || !world || world.day < 48 || offline) return
+    fetch('/api/east-spring').then(response => response.ok ? response.json() : null).then(result => {
+      if (result?.seen) setEastSeen(true)
+      if (result?.compared) setWatersCompared(true)
+    }).catch(() => undefined)
+  }, [user, world, offline])
+
+  useEffect(() => {
     if (!user || !world || world.day < 12 || offline) return
     fetch('/api/insects').then(response => response.ok ? response.json() : null).then(result => {
       if (result?.state) setInsectState(result.state)
@@ -599,12 +648,14 @@ function App() {
   const preview = mode !== 'production'
 
   return (
-    <main className={`game-shell ${captureMode ? 'capture-mode' : ''}`}>
+    <main className={`game-shell ${captureMode ? 'capture-mode' : ''} ${world?.day && world.day >= 46 ? `phase-${dayPhase}` : ''}`}>
       {preview && <div className="preview-banner">{mode === 'day1' ? 'DAY 1 保存版' : `進化テスト · DAY ${world?.day ?? '…'}`}</div>}
       <section className="world" aria-label={world ? `はじまりの庭 Day ${world.day}` : 'はじまりの庭'}>
         <nav className="world-actions" aria-label="世界の記録">
           <button onClick={() => setPanel('diary')} aria-label="創世日記">▤</button>
           {world?.day && world.day >= 5 && <button onClick={() => { setInventoryStatus(''); setPanel('inventory') }} aria-label="持ち物">▣</button>}
+          {world?.day && world.day >= 46 && <button onClick={() => setDayPhase(current => current === 'morning' ? 'evening' : 'morning')} aria-label={`現在は${dayPhase === 'morning' ? '朝' : '夕'}。朝夕を切り替え`} title="朝夕を切り替え">{dayPhase === 'morning' ? '☀' : '☾'}</button>}
+          {world?.day && world.day >= 50 && <button onClick={() => setPanel('choices')} aria-label="10分の遊び方を選ぶ">◈</button>}
           <button onClick={() => setPanel('account')} aria-label="アカウント">●</button>
         </nav>
         {world && <div className="pixel-map" style={{ '--cols': world.width, '--rows': world.height } as CSSProperties}>
@@ -669,11 +720,11 @@ function App() {
       </section>
       {/* Outside the world, so scrolling the garden never moves the hand away. */}
       <div className="hud">
-        <div className="message-window" role="status" aria-live="polite"><p>{message || '\u00a0'}</p></div>
+        <div className="message-window" role="status" aria-live="polite"><p>{message || '\u00a0'}</p>{world?.day && world.day >= 50 && activity && <p className="activity-status">{activities.find(choice => choice.key === activity)?.label} · {activityComplete ? '達成' : '選択中'}</p>}</div>
         <Controls move={move} act={act} />
       </div>
       {panel && <div className="overlay" role="presentation" onMouseDown={event => event.target === event.currentTarget && setPanel(null)}>
-          <section className="record-window" role="dialog" aria-modal="true" aria-label={panel === 'diary' ? '創世日記' : panel === 'wish' ? '願い事' : panel === 'inventory' ? '持ち物' : 'アカウント'}>
+          <section className="record-window" role="dialog" aria-modal="true" aria-label={panel === 'diary' ? '創世日記' : panel === 'wish' ? '願い事' : panel === 'inventory' ? '持ち物' : panel === 'choices' ? '今日の10分' : 'アカウント'}>
           <button className="close-button" onClick={() => setPanel(null)} aria-label="閉じる">×</button>
           {panel === 'diary' && <>
             <h1>創世日記</h1>
@@ -706,7 +757,18 @@ function App() {
             {user && world && world.day >= 44 && lastReleaseHabitat && <p className="small-text">最後に魚を戻した場所: {lastReleaseHabitat === 'shallow' ? '浅瀬' : '深場'}</p>}
             {user && world && world.day >= 43 && bankSeen && <p className="small-text">池の東の縁で、三つ目の魚影を見つけました。</p>}
             {user && world && world.day >= 45 && habitatCare && <p className="small-text">花と水の記録: DAY {habitatCare.preparedDay} に{habitatCare.flowerColor === 'yellow' ? '黄色' : '白色'}の花と庭を整えました。{habitatCare.revisited ? '次の訪問の気配が残っています。' : '次の訪問を待っています。'}</p>}
+            {user && world && world.day >= 48 && <p className="small-text">東の泉: {eastSeen ? '観察済み' : '未観察'}。{watersCompared ? '庭の池との違いを記録しました。' : '池と泉の両方を訪ねると比較できます。'}</p>}
             {inventoryStatus && <p role="status">{inventoryStatus}</p>}
+          </>}
+          {panel === 'choices' && <>
+            <h1>今日の10分</h1>
+            <p>一つ選び、庭で実際に試しましょう。途中で選び直せます。</p>
+            <div className="activity-choices">{activities.map(choice => <button key={choice.key}
+              className={activity === choice.key ? 'selected' : ''}
+              onClick={() => { setActivity(choice.key); setActivityComplete(false); setMessage(`${choice.label}: ${choice.hint}`); setPanel(null) }}>
+              <strong>{choice.label}</strong><span>{choice.hint}</span>
+            </button>)}</div>
+            {activity && <p role="status">{activities.find(choice => choice.key === activity)?.label}: {activityComplete ? '今日の一歩を達成しました。' : '選択中です。'}</p>}
           </>}
           {panel === 'account' && <>
             <h1>記憶</h1>

@@ -687,6 +687,30 @@ button {
 .map-pond.pond-caught i:nth-child(2),
 .map-pond.pond-caught i:nth-child(3) { opacity: .3; }
 
+.phase-evening .world { filter: saturate(.82) brightness(.82); }
+.phase-evening .map-pond::after { background: linear-gradient(200deg, #497b8b, #28445d 72%, #202f51); }
+.phase-evening .map-pond.pond-fish i:nth-child(2),
+.phase-evening .map-pond.pond-fish i:nth-child(3) { animation-duration: 6.6s; top: 57%; }
+.phase-evening .map-pond.pond-two-fish .pond-deep-fish { animation-duration: 4.5s; top: 46%; }
+.phase-evening .map-shore-creature i:first-child { animation-duration: 8s; }
+
+.map-east-spring::before,
+.map-east-spring::after { content: ''; position: absolute; inset: 0; clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); }
+.map-east-spring::before { background: #7d9d67; }
+.map-east-spring::after { background: linear-gradient(160deg, #a2cbcb, #5488a0 68%, #3a6682); transform: scale(.78); }
+.map-east-spring i:first-child { z-index: 2; left: 35%; top: 37%; width: 25%; height: 25%; border: 2px solid #daf0d9; border-radius: 50%; animation: pond-ripple 2.7s ease-out infinite; }
+.map-east-spring i:nth-child(2) { z-index: 2; left: 62%; top: 44%; width: 7%; height: 5%; background: #344e44; border-radius: 50%; animation: spring-skate 2s linear infinite alternate; }
+.map-east-waterbug i:first-child { left: 32%; top: 55%; width: 20%; height: 9%; border-radius: 50%; background: #425244; animation: spring-skate 1.7s ease-in-out infinite alternate; }
+.map-east-waterbug i:nth-child(2) { left: 22%; top: 64%; width: 40%; height: 2px; background: #53694f; transform: rotate(-18deg); }
+.map-east-waterbug i:nth-child(3) { left: 25%; top: 51%; width: 36%; height: 2px; background: #53694f; transform: rotate(18deg); }
+.phase-evening .map-east-spring::after { background: linear-gradient(160deg, #718fa1, #3d607f 68%, #304568); }
+@keyframes spring-skate { to { transform: translateX(80%); } }
+
+.activity-choices { display: grid; gap: 10px; }
+.activity-choices button { display: flex; flex-direction: column; gap: 3px; text-align: left; padding: 11px 14px; border: 3px solid #75684e; background: #fff8e8; cursor: pointer; }
+.activity-choices button.selected { border-color: #345b45; background: #dcebd1; }
+.activity-choices span, .activity-status { font-size: 13px; }
+
 .map-shore-creature i:first-child {
   left: 27%;
   top: 62%;
@@ -1115,12 +1139,14 @@ button:focus-visible { outline: 4px solid #fff2a8; outline-offset: 3px; }
 
 @media (prefers-reduced-motion: reduce) {
   .player { transition: none; }
-  .map-pond i, .map-pond .pond-deep-fish, .map-pond .pond-bank-fish, .map-shore-creature i, .map-garden-visitor i, .map-fruit-visitor i, .map-insect-grass i, .map-insect-meadow i, .map-striped-beetle i, .map-insect-flowers i, .map-placed-reed i, .map-lantern::before { animation: none !important; }
+  .map-pond i, .map-pond .pond-deep-fish, .map-pond .pond-bank-fish, .map-east-spring i, .map-east-waterbug i, .map-shore-creature i, .map-garden-visitor i, .map-fruit-visitor i, .map-insect-grass i, .map-insect-meadow i, .map-striped-beetle i, .map-insect-flowers i, .map-placed-reed i, .map-lantern::before { animation: none !important; }
 }
 
 .capture-mode .map-pond i,
 .capture-mode .map-pond .pond-deep-fish,
 .capture-mode .map-pond .pond-bank-fish,
+.capture-mode .map-east-spring i,
+.capture-mode .map-east-waterbug i,
 .capture-mode .map-shore-creature i,
 .capture-mode .map-garden-visitor i,
 .capture-mode .map-fruit-visitor i,
