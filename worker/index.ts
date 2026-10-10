@@ -226,6 +226,14 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
     const habitatName = habitat === 'shallow' ? '浅瀬' : '深場'
     const fishing = await env.DB.prepare('SELECT rod_borrowed, state FROM player_fishing WHERE user_id = ?')
       .bind(user.id).first<{ rod_borrowed: number; state: 'idle' | 'cast' | 'caught' }>()
+    if (fishing?.state === 'idle' && today.world_day >= 49) {
+      const compared = await env.DB.prepare(`UPDATE player_east_observations SET compared_day = ?
+        WHERE user_id = ? AND compared_day IS NULL AND EXISTS
+          (SELECT 1 FROM player_habitat_observations WHERE user_id = ?)
+        RETURNING compared_day`).bind(today.world_day, user.id, user.id).first()
+      if (compared) return json({ state: 'idle', comparedWaters: true,
+        message: '庭の池には細い魚影と丸い魚影。東の泉には水面を滑る虫がいます。二つの水辺の違いを観察記録に残しました。' })
+    }
     if (fishing?.state === 'idle' && today.world_day >= 43 && x >= target.x + target.width && y >= target.y && y < target.y + target.height) {
       const bank = await env.DB.prepare(`UPDATE player_fishing SET bank_seen_day = ?, updated_at = CURRENT_TIMESTAMP
         WHERE user_id = ? AND bank_seen_day IS NULL RETURNING bank_seen_day`)
@@ -234,6 +242,16 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
         message: '池の東の縁で、細く角ばった三つ目の魚影を見つけました。ほかの二匹と通り道が違います。' })
     }
     if (fishing?.state === 'idle' && today.world_day >= 33) {
+      if (today.world_day >= 47) {
+        const prior = await env.DB.prepare(`SELECT first_day FROM player_habitat_observations
+          WHERE user_id = ? AND habitat_key = ?`).bind(user.id, habitat).first<{ first_day: number }>()
+        if (prior && prior.first_day < today.world_day) {
+          const revisit = await env.DB.prepare(`INSERT OR IGNORE INTO player_revisits
+            (user_id, habitat_key, world_day) VALUES (?, ?, ?)`).bind(user.id, habitat, today.world_day).run()
+          if (revisit.meta.changes) return json({ state: 'idle', revisitedHabitat: habitat,
+            message: `DAY ${prior.first_day} に見た${habitatName}へ戻りました。同じ魚影の通り道が、今日も水面に残っています。` })
+        }
+      }
       const observation = await env.DB.prepare(`INSERT OR IGNORE INTO player_habitat_observations
         (user_id, habitat_key, first_day) VALUES (?, ?, ?)`).bind(user.id, habitat, today.world_day).run()
       if (observation.meta.changes) {
@@ -272,6 +290,49 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
       message: today.world_day >= 44
         ? `${habitatName}から魚を池へ戻しました。この岸の放流を観察記録に残しました。魚影が泳ぎ去ります。`
         : '魚を池へ戻しました。魚影がゆっくり泳ぎ去ります。' })
+  }
+
+  if (url.pathname === '/api/east-spring' && request.method === 'GET') {
+    const user = await currentUser(request, env)
+    const today = await publishedDay(env)
+    if (!user || !today || today.world_day < 48) return json({ seen: false, compared: false })
+    const record = await env.DB.prepare('SELECT compared_day FROM player_east_observations WHERE user_id = ?')
+      .bind(user.id).first<{ compared_day: number | null }>()
+    return json({ seen: Boolean(record), compared: Boolean(record?.compared_day) })
+  }
+
+  if (url.pathname === '/api/east-spring' && request.method === 'POST') {
+    if (request.headers.get('origin') !== url.origin) return json({ error: 'このページから操作してください。' }, 403)
+    const today = await publishedDay(env)
+    if (!today || today.world_day < 48) return json({ error: '東の泉はまだありません。' }, 409)
+    const input = await request.json<{ x?: number; y?: number }>()
+    const x = Number(input.x)
+    const y = Number(input.y)
+    const size = mapSize(today.world_day)
+    if (!Number.isInteger(x) || !Number.isInteger(y) || x < 1 || y < 1 || x >= size.width - 1 || y >= size.height - 1) {
+      return json({ error: 'そこからは届きません。' }, 400)
+    }
+    const spring = await env.DB.prepare(`SELECT x, y FROM world_entities WHERE entity_key = 'east-spring'
+      AND born_day <= ? AND (gone_day IS NULL OR gone_day > ?)`).bind(today.world_day, today.world_day)
+      .first<{ x: number; y: number }>()
+    if (!spring || Math.abs(x - spring.x) + Math.abs(y - spring.y) > 1) return json({ error: '泉のそばへ来てください。' }, 409)
+    const user = await currentUser(request, env)
+    if (!user) return json({ seen: false, compared: false,
+      message: '東の泉は小さく、水面を滑る虫がいます。記録を始めると池との違いを残せます。' })
+    await env.DB.prepare(`INSERT OR IGNORE INTO player_east_observations (user_id, first_day)
+      VALUES (?, ?)`).bind(user.id, today.world_day).run()
+    if (today.world_day >= 49) {
+      const compared = await env.DB.prepare(`UPDATE player_east_observations SET compared_day = ?
+        WHERE user_id = ? AND compared_day IS NULL AND EXISTS
+          (SELECT 1 FROM player_habitat_observations WHERE user_id = ?)
+        RETURNING compared_day`).bind(today.world_day, user.id, user.id).first()
+      if (compared) return json({ seen: true, compared: true,
+        message: '庭の池の魚影と、東の泉の水面を滑る虫。二つの水辺の違いを観察記録に残しました。' })
+    }
+    return json({ seen: true, compared: false,
+      message: today.world_day >= 49
+        ? '泉には水面を滑る虫がいます。庭の池にも行き、魚影との違いを確かめましょう。'
+        : '東の泉を観察記録に残しました。庭の池より小さく、波紋が短く広がります。' })
   }
 
   if (url.pathname === '/api/insects' && request.method === 'GET') {
