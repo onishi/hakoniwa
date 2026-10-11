@@ -372,6 +372,20 @@ function App() {
       }).catch(() => setMessage('泉の様子を記録できませんでした。'))
   }, [completeActivity, position])
 
+  const observeEcology = useCallback((target: WorldObject) => {
+    fetch('/api/ecology', { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ target: target.key, x: position.x, y: position.y }) })
+      .then(async response => ({ response, result: await response.json() as { error?: string; message?: string; observed?: boolean } }))
+      .then(({ response, result }) => {
+        setMessage(response.ok ? result.message ?? target.message : result.error ?? '様子がわかりません。')
+        if (!response.ok) return
+        completeActivity('observation')
+        if (target.key === 'east-nest' && result.observed) fetch('/api/world')
+          .then(worldResponse => worldResponse.ok ? worldResponse.json() : null)
+          .then(data => { if (data) setWorld(buildWorld(data)) }).catch(() => undefined)
+      }).catch(() => setMessage('観察を記録できませんでした。'))
+  }, [completeActivity, position])
+
   const insectAction = useCallback((target: 'grass' | 'meadow' | 'striped' | 'net' | 'flowers') => {
     fetch('/api/insects', {
       method: 'POST',
@@ -434,6 +448,10 @@ function App() {
       observeSpring()
       return
     }
+    if (target && ['east-bird', 'east-nest', 'east-feather'].includes(target.key) && world.day >= 51) {
+      observeEcology(target)
+      return
+    }
     if (target?.kind === 'resource') {
       if (world.day >= 25) performTool(target)
       else setMessage(target.message)
@@ -491,7 +509,7 @@ function App() {
       ? '池の中を小さな魚影が泳いでいます。'
       : target?.message ?? '柔らかな土です。けれど、植えるものはまだありません。')
     if (target?.panel) setPanel(target.panel)
-  }, [craft, direction, fishingAction, gardenAction, harvestSource, insectAction, inventory, observeSpring, performTool, pickUp, placeItem, position, reclaimTrace, shoreAction, world])
+  }, [craft, direction, fishingAction, gardenAction, harvestSource, insectAction, inventory, observeEcology, observeSpring, performTool, pickUp, placeItem, position, reclaimTrace, shoreAction, world])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
