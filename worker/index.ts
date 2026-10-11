@@ -335,6 +335,50 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
         : '東の泉を観察記録に残しました。庭の池より小さく、波紋が短く広がります。' })
   }
 
+  if (url.pathname === '/api/ecology' && request.method === 'GET') {
+    const user = await currentUser(request, env)
+    const today = await publishedDay(env)
+    if (!user || !today || today.world_day < 51) return json({ birdSeen: false, nestSeen: false, featherSeen: false })
+    const row = await env.DB.prepare(`SELECT bird_seen_day, nest_seen_day, feather_seen_day
+      FROM player_ecology_observations WHERE user_id = ?`).bind(user.id)
+      .first<{ bird_seen_day: number | null; nest_seen_day: number | null; feather_seen_day: number | null }>()
+    return json({ birdSeen: Boolean(row?.bird_seen_day), nestSeen: Boolean(row?.nest_seen_day),
+      featherSeen: Boolean(row?.feather_seen_day) })
+  }
+
+  if (url.pathname === '/api/ecology' && request.method === 'POST') {
+    if (request.headers.get('origin') !== url.origin) return json({ error: 'このページから操作してください。' }, 403)
+    const today = await publishedDay(env)
+    if (!today || today.world_day < 51) return json({ error: '泉の小鳥はまだいません。' }, 409)
+    const input = await request.json<{ target?: string; x?: number; y?: number }>()
+    const target = input.target === 'east-bird' ? { x: 14, y: 15, day: 51, column: 'bird_seen_day' }
+      : input.target === 'east-nest' ? { x: 14, y: 16, day: 52, column: 'nest_seen_day' }
+      : input.target === 'east-feather' ? { x: 13, y: 16, day: 53, column: 'feather_seen_day' } : null
+    const x = Number(input.x)
+    const y = Number(input.y)
+    const size = mapSize(today.world_day)
+    if (!target || today.world_day < target.day) return json({ error: 'そこにはまだ何もありません。' }, 404)
+    if (!Number.isInteger(x) || !Number.isInteger(y) || x < 1 || y < 1 || x >= size.width - 1 || y >= size.height - 1 ||
+      Math.abs(x - target.x) + Math.abs(y - target.y) > 1) return json({ error: 'もう少し近づいてください。' }, 409)
+    const user = await currentUser(request, env)
+    if (!user) return json({ message: input.target === 'east-bird'
+      ? '小鳥は泉の虫を見て、草の方へ飛び戻りました。' : '草の中に、小鳥がいた跡があります。' })
+    await env.DB.prepare('INSERT OR IGNORE INTO player_ecology_observations (user_id) VALUES (?)').bind(user.id).run()
+    if (input.target === 'east-feather') {
+      const nest = await env.DB.prepare('SELECT nest_seen_day FROM player_ecology_observations WHERE user_id = ?')
+        .bind(user.id).first<{ nest_seen_day: number | null }>()
+      if (!nest?.nest_seen_day || nest.nest_seen_day >= today.world_day) return json({ error: '前の日までに巣を観察してください。' }, 409)
+    }
+    const changed = await env.DB.prepare(`UPDATE player_ecology_observations SET ${target.column} = ?
+      WHERE user_id = ? AND ${target.column} IS NULL RETURNING ${target.column}`)
+      .bind(today.world_day, user.id).first()
+    return json({ observed: Boolean(changed), message: input.target === 'east-bird'
+      ? '泉の小鳥は水面を滑る虫を追い、草の方へ短く飛び戻ります。'
+      : input.target === 'east-nest'
+        ? '草の巣を観察記録に残しました。次に来たときは、近くの地面も見てみましょう。'
+        : '巣のそばの羽を観察記録に残しました。拾って数を増やさず、鳥の暮らしの跡として残します。' })
+  }
+
   if (url.pathname === '/api/insects' && request.method === 'GET') {
     const user = await currentUser(request, env)
     if (!user) return json({ state: 'free', netBorrowed: false, released: false, flowerTended: false })
@@ -805,7 +849,7 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
     const size = mapSize(today.world_day)
 
     // Everything is pinned to the published day, so one visit never mixes two days together.
-    const [entities, tiles, picked, traces, gardenTiles, decorations, flower, priorCare] = await Promise.all([
+    const [entities, tiles, picked, traces, gardenTiles, decorations, flower, priorCare, ecology, east] = await Promise.all([
       env.DB.prepare(`SELECT entity_key AS key, kind, x, y, width, height, sprite, label, message, panel, flat, blocks
         FROM world_entities WHERE born_day <= ?1 AND (gone_day IS NULL OR gone_day > ?1) ORDER BY y, x`)
         .bind(today.world_day).all<Record<string, unknown>>(),
@@ -828,6 +872,11 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
         FROM player_habitat_care WHERE user_id = ? AND prepared_day < ?
         ORDER BY prepared_day DESC LIMIT 1`).bind(viewer.id, today.world_day)
         .first<{ prepared_day: number; flower_color: string; garden_x: number; garden_y: number }>() : Promise.resolve(null),
+      viewer && today.world_day >= 53 ? env.DB.prepare(`SELECT nest_seen_day, feather_seen_day
+        FROM player_ecology_observations WHERE user_id = ?`).bind(viewer.id)
+        .first<{ nest_seen_day: number | null; feather_seen_day: number | null }>() : Promise.resolve(null),
+      viewer && today.world_day >= 55 ? env.DB.prepare('SELECT first_day FROM player_east_observations WHERE user_id = ?')
+        .bind(viewer.id).first<{ first_day: number }>() : Promise.resolve(null),
     ])
     const pickedKeys = new Set(picked.results.map(item => item.item_key))
     const traceEntities = traces.results.map(trace => ({
@@ -849,8 +898,11 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
     const visitorTile = priorCare ? { x: priorCare.garden_x, y: priorCare.garden_y } : tendedTile
     const gardenVisitor = visitorTile ? [{
       key: 'garden-visitor', kind: 'creature', x: Number(visitorTile.x), y: Number(visitorTile.y),
-      width: 1, height: 1, sprite: priorCare ? 'map-garden-visitor care-return' : 'map-garden-visitor', label: '庭の小さな訪問者',
-      message: priorCare
+      width: 1, height: 1, sprite: priorCare && flower?.flower_tended && east
+        ? 'map-garden-visitor care-return linked-visit' : priorCare ? 'map-garden-visitor care-return' : 'map-garden-visitor', label: '庭の小さな訪問者',
+      message: priorCare && flower?.flower_tended && east
+        ? '花と庭の水、東の泉の気配がつながり、小さな訪問者が戻ってきました。'
+        : priorCare
         ? `DAY ${priorCare.prepared_day} に整えた${priorCare.flower_color === 'yellow' ? '黄色' : '白色'}の花と水を覚えて、小さな生き物が庭へ戻ってきました。`
         : '水をやった庭に、小さな生き物が来ています。あなたの世話した場所を選んだようです。',
       panel: null, flat: false, blocks: false,
@@ -859,6 +911,12 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
       key: 'fruit-visitor', kind: 'creature', x: 4, y: 4, width: 1, height: 1,
       sprite: 'map-fruit-visitor', label: '果樹に来た虫',
       message: `${flower.flower_color === 'yellow' ? '黄色' : '白色'}の花を整えたあと、果樹に小さな虫が来ました。花と実の間を行き来しています。`,
+      panel: null, flat: false, blocks: false,
+    }] : []
+    const feather = ecology?.nest_seen_day && ecology.nest_seen_day < today.world_day ? [{
+      key: 'east-feather', kind: 'ecology', x: 13, y: 16, width: 1, height: 1,
+      sprite: ecology.feather_seen_day ? 'map-east-feather feather-seen' : 'map-east-feather',
+      label: '巣のそばの羽', message: '小鳥が巣と泉を行き来した跡です。',
       panel: null, flat: false, blocks: false,
     }] : []
 
@@ -870,7 +928,7 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
         ...row,
         flat: Boolean(row.flat),
         blocks: Boolean(row.blocks),
-      })), ...traceEntities, ...decorationEntities, ...gardenVisitor, ...fruitVisitor],
+      })), ...traceEntities, ...decorationEntities, ...gardenVisitor, ...fruitVisitor, ...feather],
       tiles: [...tiles.results, ...gardenTiles.results],
     })
   }
