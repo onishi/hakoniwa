@@ -187,6 +187,7 @@ button {
 .hill-tile { background: linear-gradient(155deg, #c5bd80 0 45%, #899c61 46% 72%, #697f52 73%); box-shadow: inset 0 -7px 0 #5c6f49; }
 .slope-tile { background: repeating-linear-gradient(145deg, #b7aa74 0 7px, #968a62 8px 12px); box-shadow: inset 0 -3px 0 #6b7750; }
 .stream-tile { background: repeating-linear-gradient(26.565deg, #83b9c1 0 4px, #579cae 5px 12px, #3d819b 13px 17px); }
+.stream-tile::after { content: ''; position: absolute; inset: 12% 5%; background: repeating-linear-gradient(125deg, transparent 0 12px, #d2ecdf 13px 15px, transparent 16px 26px); opacity: .45; animation: stream-flow 3s linear infinite; }
 .tilled-tile { background: repeating-linear-gradient(135deg, #8a5c3d 0 5px, #a8754d 6px 10px); }
 .planted-tile { background: radial-gradient(circle at 50% 45%, #6f9f4f 0 16%, #8f7047 17% 100%); }
 .watered-tile { background: radial-gradient(circle at 50% 45%, #73a7a0 0 22%, #6d8055 23% 100%); }
@@ -697,6 +698,12 @@ button {
 .phase-evening .map-pond.pond-two-fish .pond-deep-fish { animation-duration: 4.5s; top: 46%; }
 .phase-evening .map-shore-creature i:first-child { animation-duration: 8s; }
 
+.map-stream-fish i:first-child { left: 24%; top: 43%; width: 48%; height: 17%; border-radius: 70% 35% 50% 45%; background: #304f59; transform: rotate(-25deg); animation: stream-fish-swim 3.8s ease-in-out infinite alternate; }
+.map-stream-fish i:nth-child(2) { left: 18%; top: 50%; width: 16%; height: 17%; clip-path: polygon(100% 50%, 0 0, 0 100%); background: #304f59; animation: stream-fish-swim 3.8s ease-in-out infinite alternate; }
+.map-stream-fish i:nth-child(3) { left: 51%; top: 37%; width: 25%; height: 25%; border: 2px solid #d1e9e0; border-radius: 50%; animation: pond-ripple 3s ease-out infinite; }
+.map-stream-fish.stream-cast i:nth-child(3) { border-color: #f8e0a2; opacity: 1; }
+.map-stream-fish.stream-caught i:first-child, .map-stream-fish.stream-caught i:nth-child(2) { opacity: .2; }
+
 .map-east-spring::before,
 .map-east-spring::after { content: ''; position: absolute; inset: 0; clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); }
 .map-east-spring::before { background: #7d9d67; }
@@ -946,6 +953,8 @@ button {
   to { opacity: 0; transform: scale(2.5); }
 }
 
+@keyframes stream-flow { to { background-position: 26px 0; } }
+@keyframes stream-fish-swim { from { translate: -12% 8%; } to { translate: 12% -8%; } }
 @keyframes fish-swim {
   0%, 18% { transform: translate(-14%, 5%); }
   72%, 100% { transform: translate(45%, -18%); }
@@ -1153,10 +1162,12 @@ button:focus-visible { outline: 4px solid #fff2a8; outline-offset: 3px; }
 
 @media (prefers-reduced-motion: reduce) {
   .player { transition: none; }
-  .map-pond i, .map-pond .pond-deep-fish, .map-pond .pond-bank-fish, .map-east-spring i, .map-east-waterbug i, .map-east-bird i, .map-shore-creature i, .map-garden-visitor i, .map-fruit-visitor i, .map-insect-grass i, .map-insect-meadow i, .map-striped-beetle i, .map-insect-flowers i, .map-placed-reed i, .map-lantern::before { animation: none !important; }
+  .stream-tile::after, .map-stream-fish i, .map-pond i, .map-pond .pond-deep-fish, .map-pond .pond-bank-fish, .map-east-spring i, .map-east-waterbug i, .map-east-bird i, .map-shore-creature i, .map-garden-visitor i, .map-fruit-visitor i, .map-insect-grass i, .map-insect-meadow i, .map-striped-beetle i, .map-insect-flowers i, .map-placed-reed i, .map-lantern::before { animation: none !important; }
 }
 
 .capture-mode .map-pond i,
+.capture-mode .stream-tile::after,
+.capture-mode .map-stream-fish i,
 .capture-mode .map-pond .pond-deep-fish,
 .capture-mode .map-pond .pond-bank-fish,
 .capture-mode .map-east-spring i,

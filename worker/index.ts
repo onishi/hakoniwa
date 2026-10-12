@@ -829,6 +829,70 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
       : next.elevation > here.elevation ? '斜面を登りました。丘の上が見渡せます。' : '斜面を下りました。庭の道へ戻れます。' })
   }
 
+  if (url.pathname === '/api/stream-fishing' && request.method === 'GET') {
+    const today = await publishedDay(env)
+    const user = await currentUser(request, env)
+    if (!today || today.world_day < 68 || !user) return json({ state: 'idle', observed: false })
+    const record = await env.DB.prepare('SELECT first_seen_day, world_day, state, released_day, revisit_day FROM player_stream_fishing WHERE user_id = ?')
+      .bind(user.id).first<{ first_seen_day: number; world_day: number; state: string; released_day: number | null; revisit_day: number | null }>()
+    return json({ state: record?.world_day === today.world_day ? record.state : 'idle',
+      observed: Boolean(record), released: Boolean(record?.released_day), revisited: Boolean(record?.revisit_day) })
+  }
+
+  if (url.pathname === '/api/stream-fishing' && request.method === 'POST') {
+    if (request.headers.get('origin') !== url.origin) return json({ error: 'このページから操作してください。' }, 403)
+    const today = await publishedDay(env)
+    if (!today || today.world_day < 67) return json({ error: '小川にはまだ魚影がありません。' }, 409)
+    const input = await request.json<{ x?: number; y?: number }>()
+    const x = Number(input.x)
+    const y = Number(input.y)
+    const size = mapSize(today.world_day)
+    if (!Number.isInteger(x) || !Number.isInteger(y) || x < 1 || y < 1 || x >= size.width - 1 || y >= size.height - 1) {
+      return json({ error: 'そこからは届きません。' }, 400)
+    }
+    const fish = await env.DB.prepare(`SELECT x, y FROM world_entities WHERE entity_key = 'stream-fish'
+      AND born_day <= ? AND (gone_day IS NULL OR gone_day > ?)`)
+      .bind(today.world_day, today.world_day).first<{ x: number; y: number }>()
+    if (!fish || Math.abs(x - fish.x) + Math.abs(y - fish.y) > 1) return json({ error: '小川の魚影へ近づいてください。' }, 409)
+    if (today.world_day < 68) return json({ state: 'idle', message: '細い魚影が流れに逆らって泳ぎ、石の陰へ戻りました。' })
+    const user = await currentUser(request, env)
+    if (!user) return json({ state: 'idle', message: '魚影を見守りました。記録を始めると、また来たときに通り道を比べられます。' })
+    const observed = await env.DB.prepare(`INSERT OR IGNORE INTO player_stream_fishing
+      (user_id, first_seen_day, world_day) VALUES (?, ?, ?)`)
+      .bind(user.id, today.world_day, today.world_day).run()
+    if (observed.meta.changes) return json({ state: 'idle', observed: true,
+      message: '流れに逆らう細い魚影を、釣らずに観察記録へ残しました。' })
+    await env.DB.prepare(`UPDATE player_stream_fishing SET state = 'idle', world_day = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE user_id = ? AND world_day < ?`).bind(today.world_day, user.id, today.world_day).run()
+    const record = await env.DB.prepare('SELECT first_seen_day, state, released_day, revisit_day FROM player_stream_fishing WHERE user_id = ?')
+      .bind(user.id).first<{ first_seen_day: number; state: 'idle' | 'cast' | 'caught'; released_day: number | null; revisit_day: number | null }>()
+    if (today.world_day >= 70 && record?.released_day && record.released_day < today.world_day && !record.revisit_day) {
+      const revisit = await env.DB.prepare(`UPDATE player_stream_fishing SET revisit_day = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE user_id = ? AND revisit_day IS NULL RETURNING revisit_day`).bind(today.world_day, user.id).first()
+      if (revisit) return json({ state: 'idle', revisited: true,
+        message: '前に戻した魚影が、今日も同じ石の陰から流れへ泳ぎ出しました。再訪の記録を残しました。' })
+    }
+    if (today.world_day < 69) return json({ state: 'idle', message: '細い魚影は流れに逆らい、池の魚とは違う通り道を泳ぎます。' })
+    const rod = await env.DB.prepare('SELECT rod_borrowed FROM player_fishing WHERE user_id = ?')
+      .bind(user.id).first<{ rod_borrowed: number }>()
+    if (!rod?.rod_borrowed) return json({ state: 'idle', message: '魚影を見守りました。釣るなら池のそばで竿を借りてください。' })
+    if (record?.state === 'idle') {
+      const cast = await env.DB.prepare(`UPDATE player_stream_fishing SET state = 'cast', updated_at = CURRENT_TIMESTAMP
+        WHERE user_id = ? AND state = 'idle' RETURNING state`).bind(user.id).first()
+      if (cast) return json({ state: 'cast', message: '小川へ糸を垂らしました。流れの中で浮きが揺れています。' })
+    } else if (record?.state === 'cast') {
+      const caught = await env.DB.prepare(`UPDATE player_stream_fishing SET state = 'caught', updated_at = CURRENT_TIMESTAMP
+        WHERE user_id = ? AND state = 'cast' RETURNING state`).bind(user.id).first()
+      if (caught) return json({ state: 'caught', message: '細い魚が釣れました。もう一度アクションすると小川へ戻せます。' })
+    } else if (record?.state === 'caught') {
+      const released = await env.DB.prepare(`UPDATE player_stream_fishing SET state = 'idle', released_day = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE user_id = ? AND state = 'caught' RETURNING released_day`).bind(today.world_day, user.id).first()
+      if (released) return json({ state: 'idle', released: true,
+        message: '魚を小川へ戻しました。細い影が流れをさかのぼり、石の陰へ消えます。' })
+    }
+    return json({ error: 'もう一度、魚影を見てください。' }, 409)
+  }
+
   if (url.pathname === '/api/source-action' && request.method === 'POST') {
     if (request.headers.get('origin') !== url.origin) return json({ error: 'このページから操作してください。' }, 403)
     const user = await currentUser(request, env)
