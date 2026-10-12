@@ -184,6 +184,9 @@ button {
 .path-tile { background: #c8a96c; }
 .wetland-tile { background: repeating-linear-gradient(145deg, #669c81 0 7px, #79b6a0 8px 12px); }
 .forest-tile { background: repeating-linear-gradient(145deg, #64894b 0 8px, #719951 9px 13px); }
+.hill-tile { background: linear-gradient(155deg, #c5bd80 0 45%, #899c61 46% 72%, #697f52 73%); box-shadow: inset 0 -7px 0 #5c6f49; }
+.slope-tile { background: repeating-linear-gradient(145deg, #b7aa74 0 7px, #968a62 8px 12px); box-shadow: inset 0 -3px 0 #6b7750; }
+.stream-tile { background: repeating-linear-gradient(26.565deg, #83b9c1 0 4px, #579cae 5px 12px, #3d819b 13px 17px); }
 .tilled-tile { background: repeating-linear-gradient(135deg, #8a5c3d 0 5px, #a8754d 6px 10px); }
 .planted-tile { background: radial-gradient(circle at 50% 45%, #6f9f4f 0 16%, #8f7047 17% 100%); }
 .watered-tile { background: radial-gradient(circle at 50% 45%, #73a7a0 0 22%, #6d8055 23% 100%); }
@@ -720,7 +723,7 @@ button {
 .activity-choices { display: grid; gap: 10px; }
 .activity-choices button { display: flex; flex-direction: column; gap: 3px; text-align: left; padding: 11px 14px; border: 3px solid #75684e; background: #fff8e8; cursor: pointer; }
 .activity-choices button.selected { border-color: #345b45; background: #dcebd1; }
-.activity-choices span, .activity-status { font-size: 13px; }
+.activity-choices span, .activity-status, .terrain-status { font-size: 13px; }
 
 .map-shore-creature i:first-child {
   left: 27%;
