@@ -414,6 +414,19 @@ function App() {
       }).catch(() => setMessage('トンボの観察を記録できませんでした。'))
   }, [completeActivity, position])
 
+  const residentAction = useCallback((target: 'hill-resident' | 'stream-resident') => {
+    fetch('/api/resident', { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ target, x: position.x, y: position.y }) })
+      .then(async response => ({ response, result: await response.json() as { error?: string; message?: string; gift?: boolean; exchange?: boolean } }))
+      .then(({ response, result }) => {
+        setMessage(response.ok ? result.message ?? '' : result.error ?? '住人と話せません。')
+        if (!response.ok || (!result.gift && !result.exchange)) return
+        completeActivity('gathering')
+        fetch('/api/inventory').then(inventoryResponse => inventoryResponse.ok ? inventoryResponse.json() : null)
+          .then(data => { if (data?.items) setInventory(data.items) }).catch(() => undefined)
+      }).catch(() => setMessage('住人とのやりとりを記録できませんでした。'))
+  }, [completeActivity, position])
+
   const observeSpring = useCallback(() => {
     fetch('/api/east-spring', { method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ x: position.x, y: position.y }) })
@@ -522,6 +535,10 @@ function App() {
       observeStreamDragonfly()
       return
     }
+    if (target && (target.key === 'hill-resident' || target.key === 'stream-resident') && world.day >= 76) {
+      residentAction(target.key)
+      return
+    }
     if (target && ['east-bird', 'east-nest', 'east-feather'].includes(target.key) && world.day >= 51) {
       observeEcology(target)
       return
@@ -583,7 +600,8 @@ function App() {
     }
     if (!target && world.day >= 17) {
       const ground = world.groundTiles.find(tile => tile.x === position.x && tile.y === position.y)
-      const holdingSeed = inventory.some(item => ['item-seed', 'item-berry', 'item-sprout'].includes(item.key))
+      const holdingSeed = inventory.some(item => ['item-seed', 'item-berry', 'item-sprout'].includes(item.key) ||
+        (world.day >= 79 && item.key === 'item-windseed'))
       const gardenTile = ground && ['tilled', 'planted', 'watered', 'grown'].includes(ground.kind)
       const holdingLantern = world.day >= 29 && inventory.some(item => item.key === 'item-lantern')
       const holdingReed = world.day >= 38 && inventory.some(item => item.key === 'item-reed')
@@ -596,7 +614,7 @@ function App() {
       ? '池の中を小さな魚影が泳いでいます。'
       : target?.message ?? '柔らかな土です。けれど、植えるものはまだありません。')
     if (target?.panel) setPanel(target.panel)
-  }, [craft, direction, fishingAction, gardenAction, harvestSource, insectAction, inventory, observeEcology, observeSpring, observeStreamDragonfly, performTool, pickUp, placeItem, position, reclaimTrace, shoreAction, streamFishingAction, terrainAction, world])
+  }, [craft, direction, fishingAction, gardenAction, harvestSource, insectAction, inventory, observeEcology, observeSpring, observeStreamDragonfly, performTool, pickUp, placeItem, position, reclaimTrace, residentAction, shoreAction, streamFishingAction, terrainAction, world])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

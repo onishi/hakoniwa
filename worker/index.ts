@@ -723,16 +723,16 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
     if (tile.status === 'tilled') {
       if (today.world_day < 18) return json({ error: '実を植えられるのは DAY 18 からです。' }, 409)
       const seed = await env.DB.prepare(`SELECT item_key FROM player_items WHERE user_id = ? AND placed_at IS NULL
-        AND item_key IN ('item-seed', 'item-berry', 'item-sprout')
-        ORDER BY CASE item_key WHEN 'item-berry' THEN 0 WHEN 'item-seed' THEN 1 ELSE 2 END LIMIT 1`)
-        .bind(user.id).first<{ item_key: string }>()
+        AND (item_key IN ('item-seed', 'item-berry', 'item-sprout') OR (? >= 79 AND item_key = 'item-windseed'))
+        ORDER BY CASE item_key WHEN 'item-windseed' THEN 0 WHEN 'item-berry' THEN 1 WHEN 'item-seed' THEN 2 ELSE 3 END LIMIT 1`)
+        .bind(user.id, today.world_day).first<{ item_key: string }>()
       if (!seed) return json({ error: '植える種を持っていません。' }, 409)
       await env.DB.prepare(`UPDATE player_items SET quantity = CASE WHEN quantity > 1 THEN quantity - 1 ELSE quantity END,
         placed_at = CASE WHEN quantity > 1 THEN NULL ELSE CURRENT_TIMESTAMP END, updated_at = CURRENT_TIMESTAMP
         WHERE user_id = ? AND item_key = ? AND placed_at IS NULL`).bind(user.id, seed.item_key).run()
       await env.DB.prepare(`UPDATE player_garden_tiles SET status = 'planted', seed_key = ?, planted_day = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND x = ? AND y = ?`)
         .bind(seed.item_key, today.world_day, user.id, x, y).run()
-      return json({ ok: true, state: 'planted', message: '種を植えました。' })
+      return json({ ok: true, state: 'planted', message: seed.item_key === 'item-windseed' ? '風の種を植えました。' : '種を植えました。' })
     }
     if (tile.status === 'planted' && today.world_day >= 19) {
       await env.DB.prepare(`UPDATE player_garden_tiles SET status = 'watered', last_watered_day = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND x = ? AND y = ?`)
@@ -879,6 +879,86 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
           : first.meta.changes ? 'トンボが水面と草を往復する飛び方を観察記録に残しました。'
             : record?.linked_day ? 'トンボは魚影の上を避け、草へ向かって少し高く飛びます。'
               : 'トンボは水面から草へ飛び、また同じ流れの上へ戻ります。' })
+  }
+
+  if (url.pathname === '/api/resident' && request.method === 'POST') {
+    if (request.headers.get('origin') !== url.origin) return json({ error: 'このページから操作してください。' }, 403)
+    const today = await publishedDay(env)
+    if (!today || today.world_day < 76) return json({ error: '住人はまだ来ていません。' }, 409)
+    const input = await request.json<{ target?: string; x?: number; y?: number }>()
+    if (input.target !== 'hill-resident' && input.target !== 'stream-resident') return json({ error: '話す相手を選んでください。' }, 400)
+    const x = Number(input.x)
+    const y = Number(input.y)
+    const size = mapSize(today.world_day)
+    if (!Number.isInteger(x) || !Number.isInteger(y) || x < 1 || y < 1 || x >= size.width - 1 || y >= size.height - 1) {
+      return json({ error: 'そこからは届きません。' }, 400)
+    }
+    const resident = await env.DB.prepare(`SELECT x, y FROM world_entities WHERE entity_key = ?
+      AND born_day <= ? AND (gone_day IS NULL OR gone_day > ?)`)
+      .bind(input.target, today.world_day, today.world_day).first<{ x: number; y: number }>()
+    if (!resident || Math.abs(x - resident.x) + Math.abs(y - resident.y) > 1) return json({ error: '住人へ近づいてください。' }, 409)
+    const hill = input.target === 'hill-resident'
+    const user = await currentUser(request, env)
+    if (!user || today.world_day < 78) return json({ message: hill
+      ? '丘の住人は「魚影は流れを上るけれど、石はずっとここにいる」と話します。'
+      : '小川の住人は「石も水に磨かれれば、遠くまで旅をする」と話します。' })
+    await env.DB.prepare('INSERT OR IGNORE INTO player_resident_relations (user_id) VALUES (?)').bind(user.id).run()
+    const relation = await env.DB.prepare('SELECT gift_day, exchange_day, revisit_day FROM player_resident_relations WHERE user_id = ?')
+      .bind(user.id).first<{ gift_day: number | null; exchange_day: number | null; revisit_day: number | null }>()
+    if (hill) {
+      if (!relation?.gift_day) {
+        const claim = randomToken()
+        const results = await env.DB.batch([
+          env.DB.prepare(`UPDATE player_resident_relations SET gift_day = ?, gift_token = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE user_id = ? AND gift_day IS NULL AND EXISTS
+              (SELECT 1 FROM player_items WHERE user_id = ? AND item_key = 'item-ore' AND placed_at IS NULL)
+            RETURNING gift_day`).bind(today.world_day, claim, user.id, user.id),
+          env.DB.prepare(`UPDATE player_items SET quantity = CASE WHEN quantity > 1 THEN quantity - 1 ELSE quantity END,
+            placed_at = CASE WHEN quantity > 1 THEN NULL ELSE CURRENT_TIMESTAMP END, updated_at = CURRENT_TIMESTAMP
+            WHERE user_id = ? AND item_key = 'item-ore' AND placed_at IS NULL AND EXISTS
+              (SELECT 1 FROM player_resident_relations WHERE user_id = ? AND gift_token = ?)`)
+            .bind(user.id, user.id, claim),
+        ])
+        if (results[0].meta.changes) return json({ gift: true,
+          message: '丘の住人へ石のかけらを渡しました。「この丘を覚えておきます」と受け取ります。' })
+        return json({ message: '丘の住人は石のかけらに関心があるようです。丘の石から採って持っていけます。' })
+      }
+      return json({ remembered: true, message: today.world_day >= 80
+        ? '丘の住人は渡した石を覚えています。「あの石を見て、小川の道を考えています」。'
+        : '丘の住人は石のかけらを手元に置き、流れの音を聞いています。' })
+    }
+    if (today.world_day < 79) return json({ message: '小川の住人は流木を眺めています。丘の住人へ石を渡した話を聞いてみたいようです。' })
+    if (!relation?.gift_day) return json({ message: '小川の住人は丘の住人が見つけた石の話を聞きたがっています。' })
+    if (!relation.exchange_day) {
+      const claim = randomToken()
+      const results = await env.DB.batch([
+        env.DB.prepare(`UPDATE player_resident_relations SET exchange_day = ?, exchange_token = ?, updated_at = CURRENT_TIMESTAMP
+          WHERE user_id = ? AND gift_day IS NOT NULL AND exchange_day IS NULL AND EXISTS
+            (SELECT 1 FROM player_items WHERE user_id = ? AND item_key = 'item-wood' AND placed_at IS NULL)
+          RETURNING exchange_day`).bind(today.world_day, claim, user.id, user.id),
+        env.DB.prepare(`UPDATE player_items SET quantity = CASE WHEN quantity > 1 THEN quantity - 1 ELSE quantity END,
+          placed_at = CASE WHEN quantity > 1 THEN NULL ELSE CURRENT_TIMESTAMP END, updated_at = CURRENT_TIMESTAMP
+          WHERE user_id = ? AND item_key = 'item-wood' AND placed_at IS NULL AND EXISTS
+            (SELECT 1 FROM player_resident_relations WHERE user_id = ? AND exchange_token = ?)`)
+          .bind(user.id, user.id, claim),
+        env.DB.prepare(`INSERT INTO player_items (user_id, item_key, quantity, first_picked_day, placed_at)
+          SELECT ?, 'item-windseed', 1, ?, NULL WHERE EXISTS
+            (SELECT 1 FROM player_resident_relations WHERE user_id = ? AND exchange_token = ?)
+          ON CONFLICT(user_id, item_key) DO UPDATE SET quantity = CASE
+            WHEN player_items.placed_at IS NULL THEN player_items.quantity + 1 ELSE 1 END,
+            placed_at = NULL, updated_at = CURRENT_TIMESTAMP`)
+          .bind(user.id, today.world_day, user.id, claim),
+      ])
+      if (results[0].meta.changes) return json({ exchange: true,
+        message: '木材を小川の住人に渡し、風の種を受け取りました。庭に植えるか、持って歩けます。' })
+      return json({ message: '小川の住人は木材を探しています。倒木から採って持っていけます。' })
+    }
+    const revisit = today.world_day >= 80 && relation.exchange_day < today.world_day && !relation.revisit_day
+      ? await env.DB.prepare(`UPDATE player_resident_relations SET revisit_day = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE user_id = ? AND revisit_day IS NULL RETURNING revisit_day`).bind(today.world_day, user.id).first() : null
+    return json({ remembered: true, revisited: Boolean(revisit), message: revisit
+      ? '小川の住人は木材と種の交換を覚えています。「あの種は、どこへ運ばれたでしょう」。再訪の記録が残りました。'
+      : '小川の住人は交換した木材を使い、流れの音を静かに聞いています。' })
   }
 
   if (url.pathname === '/api/stream-fishing' && request.method === 'POST') {
