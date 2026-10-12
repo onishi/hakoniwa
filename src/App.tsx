@@ -96,8 +96,9 @@ const buildWorld = (data: WorldResponse): World => {
     for (let y = 0; y < object.height; y += 1) {
       for (let x = 0; x < object.width; x += 1) {
         const key = `${object.x + x},${object.y + y}`
-        interactionTiles.set(key, object)
-        if (object.blocks) occupiedTiles.set(key, object)
+        const existing = interactionTiles.get(key)
+        if (!existing || (existing.kind === 'creature' && object.kind !== 'creature')) interactionTiles.set(key, object)
+        if (object.blocks && object.kind !== 'creature') occupiedTiles.set(key, object)
       }
     }
   }
@@ -174,6 +175,9 @@ function App() {
   const [activityComplete, setActivityComplete] = useState(false)
   const [eastSeen, setEastSeen] = useState(false)
   const [watersCompared, setWatersCompared] = useState(false)
+  const [gardenSignals, setGardenSignals] = useState<{ water: boolean; flower: boolean; spring: boolean; ready: boolean } | null>(null)
+  const [gardenVisitSeen, setGardenVisitSeen] = useState(false)
+  const [todayEcologyEvents, setTodayEcologyEvents] = useState<string[]>([])
   const [insectState, setInsectState] = useState<'free' | 'held'>('free')
   const [insectReleased, setInsectReleased] = useState(false)
   const [flowerTended, setFlowerTended] = useState(false)
@@ -375,11 +379,13 @@ function App() {
   const observeEcology = useCallback((target: WorldObject) => {
     fetch('/api/ecology', { method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ target: target.key, x: position.x, y: position.y }) })
-      .then(async response => ({ response, result: await response.json() as { error?: string; message?: string; observed?: boolean } }))
+      .then(async response => ({ response, result: await response.json() as { error?: string; message?: string; observed?: boolean; firstSeen?: boolean; recordedToday?: boolean } }))
       .then(({ response, result }) => {
         setMessage(response.ok ? result.message ?? target.message : result.error ?? '様子がわかりません。')
         if (!response.ok) return
         completeActivity('observation')
+        if (target.key === 'garden-visitor' && result.observed) setGardenVisitSeen(true)
+        if (result.recordedToday) setTodayEcologyEvents(current => [...new Set([...current, target.key])])
         if (target.key === 'east-nest' && result.observed) fetch('/api/world')
           .then(worldResponse => worldResponse.ok ? worldResponse.json() : null)
           .then(data => { if (data) setWorld(buildWorld(data)) }).catch(() => undefined)
@@ -433,6 +439,7 @@ function App() {
     }
     if (target?.key === 'garden-visitor') {
       if (position.x === target.x && position.y === target.y) gardenAction()
+      else if (world.day >= 57) observeEcology(target)
       else setMessage(target.message)
       return
     }
@@ -622,6 +629,15 @@ function App() {
   }, [user, world, offline])
 
   useEffect(() => {
+    if (!user || !world || world.day < 56 || offline) return
+    fetch('/api/ecology').then(response => response.ok ? response.json() : null).then(result => {
+      if (result?.gardenSignals) setGardenSignals(result.gardenSignals)
+      if (result?.gardenSeen) setGardenVisitSeen(true)
+      if (result?.todayEvents) setTodayEcologyEvents(result.todayEvents)
+    }).catch(() => undefined)
+  }, [user, world, offline, eastSeen, flowerTended, habitatCare])
+
+  useEffect(() => {
     if (!user || !world || world.day < 12 || offline) return
     fetch('/api/insects').then(response => response.ok ? response.json() : null).then(result => {
       if (result?.state) setInsectState(result.state)
@@ -776,6 +792,9 @@ function App() {
             {user && world && world.day >= 43 && bankSeen && <p className="small-text">池の東の縁で、三つ目の魚影を見つけました。</p>}
             {user && world && world.day >= 45 && habitatCare && <p className="small-text">花と水の記録: DAY {habitatCare.preparedDay} に{habitatCare.flowerColor === 'yellow' ? '黄色' : '白色'}の花と庭を整えました。{habitatCare.revisited ? '次の訪問の気配が残っています。' : '次の訪問を待っています。'}</p>}
             {user && world && world.day >= 48 && <p className="small-text">東の泉: {eastSeen ? '観察済み' : '未観察'}。{watersCompared ? '庭の池との違いを記録しました。' : '池と泉の両方を訪ねると比較できます。'}</p>}
+            {user && world && world.day >= 56 && gardenSignals && <p className="small-text">庭への訪問条件: 水{gardenSignals.water ? '✓' : '…'}・花{gardenSignals.flower ? '✓' : '…'}・泉{gardenSignals.spring ? '✓' : '…'}。{gardenSignals.ready ? '訪問者のそばで観察できます。' : 'そろうと訪問者の反応が変わります。'}</p>}
+            {user && world && world.day >= 57 && gardenVisitSeen && <p className="small-text">庭の訪問者を捕まえずに見守りました。</p>}
+            {user && world && world.day >= 59 && todayEcologyEvents.length > 0 && <p className="small-text">今日の観察: {todayEcologyEvents.length}種類</p>}
             {inventoryStatus && <p role="status">{inventoryStatus}</p>}
           </>}
           {panel === 'choices' && <>

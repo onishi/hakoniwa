@@ -59,6 +59,27 @@ async function recordHabitatCare(env: Env, userId: number, worldDay: number) {
   return Boolean(result.meta.changes)
 }
 
+async function gardenSignals(env: Env, userId: number, worldDay: number) {
+  const [care, flower, spring] = await Promise.all([
+    env.DB.prepare(`SELECT garden_x, garden_y FROM player_habitat_care
+      WHERE user_id = ? AND prepared_day < ? ORDER BY prepared_day DESC LIMIT 1`)
+      .bind(userId, worldDay).first<{ garden_x: number; garden_y: number }>(),
+    env.DB.prepare('SELECT flower_tended FROM player_insects WHERE user_id = ?')
+      .bind(userId).first<{ flower_tended: number }>(),
+    env.DB.prepare('SELECT first_day FROM player_east_observations WHERE user_id = ?')
+      .bind(userId).first<{ first_day: number }>(),
+  ])
+  return { water: Boolean(care), flower: Boolean(flower?.flower_tended), spring: Boolean(spring),
+    ready: Boolean(care && flower?.flower_tended && spring), garden: care ? { x: care.garden_x, y: care.garden_y } : null }
+}
+
+async function recordEcologyEvent(env: Env, userId: number, worldDay: number, eventKey: string) {
+  if (worldDay < 59) return false
+  const result = await env.DB.prepare(`INSERT OR IGNORE INTO player_ecology_events
+    (user_id, world_day, event_key) VALUES (?, ?, ?)`).bind(userId, worldDay, eventKey).run()
+  return Boolean(result.meta.changes)
+}
+
 const cookieValue = (request: Request, name: string) => {
   const part = request.headers.get('cookie')?.split(';').map(value => value.trim()).find(value => value.startsWith(`${name}=`))
   return part?.slice(name.length + 1)
@@ -339,11 +360,19 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
     const user = await currentUser(request, env)
     const today = await publishedDay(env)
     if (!user || !today || today.world_day < 51) return json({ birdSeen: false, nestSeen: false, featherSeen: false })
-    const row = await env.DB.prepare(`SELECT bird_seen_day, nest_seen_day, feather_seen_day
-      FROM player_ecology_observations WHERE user_id = ?`).bind(user.id)
-      .first<{ bird_seen_day: number | null; nest_seen_day: number | null; feather_seen_day: number | null }>()
+    const [row, signals, events] = await Promise.all([
+      env.DB.prepare(`SELECT bird_seen_day, nest_seen_day, feather_seen_day, garden_seen_day
+        FROM player_ecology_observations WHERE user_id = ?`).bind(user.id)
+        .first<{ bird_seen_day: number | null; nest_seen_day: number | null; feather_seen_day: number | null; garden_seen_day: number | null }>(),
+      today.world_day >= 56 ? gardenSignals(env, user.id, today.world_day) : Promise.resolve(null),
+      today.world_day >= 59 ? env.DB.prepare(`SELECT event_key FROM player_ecology_events
+        WHERE user_id = ? AND world_day = ? ORDER BY event_key`).bind(user.id, today.world_day)
+        .all<{ event_key: string }>() : Promise.resolve({ results: [] as { event_key: string }[] }),
+    ])
     return json({ birdSeen: Boolean(row?.bird_seen_day), nestSeen: Boolean(row?.nest_seen_day),
-      featherSeen: Boolean(row?.feather_seen_day) })
+      featherSeen: Boolean(row?.feather_seen_day), gardenSeen: Boolean(row?.garden_seen_day), gardenSignals: signals ? {
+        water: signals.water, flower: signals.flower, spring: signals.spring, ready: signals.ready,
+      } : null, todayEvents: events.results.map(event => event.event_key) })
   }
 
   if (url.pathname === '/api/ecology' && request.method === 'POST') {
@@ -351,6 +380,24 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
     const today = await publishedDay(env)
     if (!today || today.world_day < 51) return json({ error: '泉の小鳥はまだいません。' }, 409)
     const input = await request.json<{ target?: string; x?: number; y?: number }>()
+    if (input.target === 'garden-visitor' && today.world_day >= 57) {
+      const user = await currentUser(request, env)
+      if (!user) return json({ error: '庭の記録を始めてください。' }, 401)
+      const signals = await gardenSignals(env, user.id, today.world_day)
+      if (!signals.garden || !Number.isInteger(input.x) || !Number.isInteger(input.y) ||
+        Math.abs(input.x - signals.garden.x) + Math.abs(input.y - signals.garden.y) > 1) {
+        return json({ error: '庭の訪問者のそばへ来てください。' }, 409)
+      }
+      if (!signals.ready) return json({ observed: false,
+        message: '訪問者は庭へ来ています。花を整え、泉も観察すると、別の反応が見られそうです。' })
+      await env.DB.prepare('INSERT OR IGNORE INTO player_ecology_observations (user_id) VALUES (?)').bind(user.id).run()
+      const firstSeen = await env.DB.prepare(`UPDATE player_ecology_observations SET garden_seen_day = ?
+        WHERE user_id = ? AND garden_seen_day IS NULL RETURNING garden_seen_day`)
+        .bind(today.world_day, user.id).first()
+      const recordedToday = await recordEcologyEvent(env, user.id, today.world_day, 'garden-visitor')
+      return json({ observed: true, firstSeen: Boolean(firstSeen), recordedToday,
+        message: '花と水と泉を知る訪問者が、庭で立ち止まりました。捕まえずに見守った記録が残ります。' })
+    }
     const target = input.target === 'east-bird' ? { x: 14, y: 15, day: 51, column: 'bird_seen_day' }
       : input.target === 'east-nest' ? { x: 14, y: 16, day: 52, column: 'nest_seen_day' }
       : input.target === 'east-feather' ? { x: 13, y: 16, day: 53, column: 'feather_seen_day' } : null
@@ -372,7 +419,8 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
     const changed = await env.DB.prepare(`UPDATE player_ecology_observations SET ${target.column} = ?
       WHERE user_id = ? AND ${target.column} IS NULL RETURNING ${target.column}`)
       .bind(today.world_day, user.id).first()
-    return json({ observed: Boolean(changed), message: input.target === 'east-bird'
+    const recordedToday = await recordEcologyEvent(env, user.id, today.world_day, input.target!)
+    return json({ observed: Boolean(changed), recordedToday, message: input.target === 'east-bird'
       ? '泉の小鳥は水面を滑る虫を追い、草の方へ短く飛び戻ります。'
       : input.target === 'east-nest'
         ? '草の巣を観察記録に残しました。次に来たときは、近くの地面も見てみましょう。'
