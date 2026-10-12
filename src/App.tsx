@@ -396,8 +396,22 @@ function App() {
         if (!response.ok) return
         if (result.state) setStreamFishingState(result.state)
         if (result.observed || result.revisited) completeActivity('observation')
-        if (result.released) completeActivity('fishing')
+        if (result.released) {
+          completeActivity('fishing')
+          fetch('/api/world').then(worldResponse => worldResponse.ok ? worldResponse.json() : null)
+            .then(data => { if (data) setWorld(buildWorld(data)) }).catch(() => undefined)
+        }
       }).catch(() => setMessage('小川の記録を残せませんでした。'))
+  }, [completeActivity, position])
+
+  const observeStreamDragonfly = useCallback(() => {
+    fetch('/api/stream-dragonfly', { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ x: position.x, y: position.y }) })
+      .then(async response => ({ response, result: await response.json() as { error?: string; message?: string; observed?: boolean; linked?: boolean; revisited?: boolean } }))
+      .then(({ response, result }) => {
+        setMessage(response.ok ? result.message ?? '' : result.error ?? 'トンボを見られません。')
+        if (response.ok && (result.observed || result.linked || result.revisited)) completeActivity('observation')
+      }).catch(() => setMessage('トンボの観察を記録できませんでした。'))
   }, [completeActivity, position])
 
   const observeSpring = useCallback(() => {
@@ -504,6 +518,10 @@ function App() {
       streamFishingAction()
       return
     }
+    if (target?.key === 'stream-dragonfly' && world.day >= 71) {
+      observeStreamDragonfly()
+      return
+    }
     if (target && ['east-bird', 'east-nest', 'east-feather'].includes(target.key) && world.day >= 51) {
       observeEcology(target)
       return
@@ -578,7 +596,7 @@ function App() {
       ? '池の中を小さな魚影が泳いでいます。'
       : target?.message ?? '柔らかな土です。けれど、植えるものはまだありません。')
     if (target?.panel) setPanel(target.panel)
-  }, [craft, direction, fishingAction, gardenAction, harvestSource, insectAction, inventory, observeEcology, observeSpring, performTool, pickUp, placeItem, position, reclaimTrace, shoreAction, streamFishingAction, terrainAction, world])
+  }, [craft, direction, fishingAction, gardenAction, harvestSource, insectAction, inventory, observeEcology, observeSpring, observeStreamDragonfly, performTool, pickUp, placeItem, position, reclaimTrace, shoreAction, streamFishingAction, terrainAction, world])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -789,7 +807,7 @@ function App() {
             return (
               <div
                 key={object.key}
-                className={`map-object ${object.sprite} ${object.flat ? 'is-flat' : ''} ${object.key === 'stream-fish' ? `stream-${streamFishingState}` : ''} ${object.key === 'pond' && world.day >= 2 ? 'pond-awake' : ''} ${object.key === 'pond' && world.day >= 3 ? 'pond-fish' : ''} ${object.key === 'pond' && world.day >= 31 ? 'pond-shallows' : ''} ${object.key === 'pond' && world.day >= 32 ? 'pond-two-fish' : ''} ${object.key === 'pond' && world.day >= 34 ? 'pond-after-rain' : ''} ${object.key === 'pond' && world.day >= 43 ? 'pond-third-fish' : ''} ${object.key === 'pond' && fishingState === 'cast' ? 'pond-cast' : ''} ${object.key === 'pond' && fishingState === 'caught' ? 'pond-caught' : ''} ${object.key === 'insect-grass' && insectState === 'held' ? 'bug-held' : ''} ${object.key === 'insect-flowers' && (flowerTended || insectReleased) ? 'flower-attracted' : ''} ${object.key === 'insect-flowers' && world.day >= 36 ? `flower-${flowerColor}` : ''} ${object.key === 'shore-creature' && world.day >= 39 && Math.abs(position.x - object.x) + Math.abs(position.y - object.y) <= 1 ? position.y < object.y ? 'shore-calm' : 'shore-wary' : ''}`}
+                className={`map-object ${object.sprite} ${object.flat ? 'is-flat' : ''} ${object.key === 'stream-dragonfly' && world.day >= 72 ? 'dragonfly-flight' : ''} ${object.key === 'stream-fish' ? `stream-${streamFishingState}` : ''} ${object.key === 'pond' && world.day >= 2 ? 'pond-awake' : ''} ${object.key === 'pond' && world.day >= 3 ? 'pond-fish' : ''} ${object.key === 'pond' && world.day >= 31 ? 'pond-shallows' : ''} ${object.key === 'pond' && world.day >= 32 ? 'pond-two-fish' : ''} ${object.key === 'pond' && world.day >= 34 ? 'pond-after-rain' : ''} ${object.key === 'pond' && world.day >= 43 ? 'pond-third-fish' : ''} ${object.key === 'pond' && fishingState === 'cast' ? 'pond-cast' : ''} ${object.key === 'pond' && fishingState === 'caught' ? 'pond-caught' : ''} ${object.key === 'insect-grass' && insectState === 'held' ? 'bug-held' : ''} ${object.key === 'insect-flowers' && (flowerTended || insectReleased) ? 'flower-attracted' : ''} ${object.key === 'insect-flowers' && world.day >= 36 ? `flower-${flowerColor}` : ''} ${object.key === 'shore-creature' && world.day >= 39 && Math.abs(position.x - object.x) + Math.abs(position.y - object.y) <= 1 ? position.y < object.y ? 'shore-calm' : 'shore-wary' : ''}`}
                 style={{
                   '--ux': ux,
                   '--uy': uy,
