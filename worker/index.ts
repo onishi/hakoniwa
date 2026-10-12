@@ -839,6 +839,48 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
       observed: Boolean(record), released: Boolean(record?.released_day), revisited: Boolean(record?.revisit_day) })
   }
 
+  if (url.pathname === '/api/stream-dragonfly' && request.method === 'POST') {
+    if (request.headers.get('origin') !== url.origin) return json({ error: 'このページから操作してください。' }, 403)
+    const today = await publishedDay(env)
+    if (!today || today.world_day < 71) return json({ error: '小川にトンボはまだいません。' }, 409)
+    const input = await request.json<{ x?: number; y?: number }>()
+    const x = Number(input.x)
+    const y = Number(input.y)
+    const size = mapSize(today.world_day)
+    if (!Number.isInteger(x) || !Number.isInteger(y) || x < 1 || y < 1 || x >= size.width - 1 || y >= size.height - 1) {
+      return json({ error: 'そこからは届きません。' }, 400)
+    }
+    const dragonfly = await env.DB.prepare(`SELECT x, y FROM world_entities WHERE entity_key = 'stream-dragonfly'
+      AND born_day <= ? AND (gone_day IS NULL OR gone_day > ?)`)
+      .bind(today.world_day, today.world_day).first<{ x: number; y: number }>()
+    if (!dragonfly || Math.abs(x - dragonfly.x) + Math.abs(y - dragonfly.y) > 1) {
+      return json({ error: '小川のトンボへ近づいてください。' }, 409)
+    }
+    if (today.world_day < 73) return json({ message: today.world_day >= 72
+      ? 'トンボは水面から草へ飛び、また同じ流れの上へ戻ります。'
+      : '細い羽のトンボが小川のそばに止まっています。' })
+    const user = await currentUser(request, env)
+    if (!user) return json({ message: 'トンボの飛ぶ道を見守りました。記録を始めると、次に来たときの違いがわかります。' })
+    const first = await env.DB.prepare(`INSERT OR IGNORE INTO player_stream_dragonfly (user_id, first_seen_day) VALUES (?, ?)`)
+      .bind(user.id, today.world_day).run()
+    const record = await env.DB.prepare('SELECT first_seen_day, linked_day, revisit_day FROM player_stream_dragonfly WHERE user_id = ?')
+      .bind(user.id).first<{ first_seen_day: number; linked_day: number | null; revisit_day: number | null }>()
+    const fish = today.world_day >= 74 ? await env.DB.prepare('SELECT released_day FROM player_stream_fishing WHERE user_id = ?')
+      .bind(user.id).first<{ released_day: number | null }>() : null
+    const linked = fish?.released_day && !record?.linked_day ? await env.DB.prepare(`UPDATE player_stream_dragonfly
+      SET linked_day = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND linked_day IS NULL RETURNING linked_day`)
+      .bind(today.world_day, user.id).first() : null
+    const revisited = today.world_day >= 75 && record && record.first_seen_day < today.world_day && !record.revisit_day
+      ? await env.DB.prepare(`UPDATE player_stream_dragonfly SET revisit_day = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE user_id = ? AND revisit_day IS NULL RETURNING revisit_day`).bind(today.world_day, user.id).first() : null
+    return json({ observed: Boolean(first.meta.changes), linked: Boolean(linked || record?.linked_day), revisited: Boolean(revisited),
+      message: revisited ? '前に見た小川へ戻りました。トンボは今日も水面と草の間を同じ順に飛んでいます。'
+        : linked ? '魚を小川へ戻したあと、トンボは魚影を避けるように少し高く飛んでいます。二つの動きを観察記録につなげました。'
+          : first.meta.changes ? 'トンボが水面と草を往復する飛び方を観察記録に残しました。'
+            : record?.linked_day ? 'トンボは魚影の上を避け、草へ向かって少し高く飛びます。'
+              : 'トンボは水面から草へ飛び、また同じ流れの上へ戻ります。' })
+  }
+
   if (url.pathname === '/api/stream-fishing' && request.method === 'POST') {
     if (request.headers.get('origin') !== url.origin) return json({ error: 'このページから操作してください。' }, 403)
     const today = await publishedDay(env)
@@ -1018,7 +1060,7 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
     const size = mapSize(today.world_day)
 
     // Everything is pinned to the published day, so one visit never mixes two days together.
-    const [entities, tiles, picked, traces, gardenTiles, decorations, flower, priorCare, ecology, east] = await Promise.all([
+    const [entities, tiles, picked, traces, gardenTiles, decorations, flower, priorCare, ecology, east, streamRelease] = await Promise.all([
       env.DB.prepare(`SELECT entity_key AS key, kind, x, y, width, height, sprite, label, message, panel, flat, blocks
         FROM world_entities WHERE born_day <= ?1 AND (gone_day IS NULL OR gone_day > ?1) ORDER BY y, x`)
         .bind(today.world_day).all<Record<string, unknown>>(),
@@ -1046,6 +1088,8 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
         .first<{ nest_seen_day: number | null; feather_seen_day: number | null }>() : Promise.resolve(null),
       viewer && today.world_day >= 55 ? env.DB.prepare('SELECT first_day FROM player_east_observations WHERE user_id = ?')
         .bind(viewer.id).first<{ first_day: number }>() : Promise.resolve(null),
+      viewer && today.world_day >= 74 ? env.DB.prepare('SELECT released_day FROM player_stream_fishing WHERE user_id = ?')
+        .bind(viewer.id).first<{ released_day: number | null }>() : Promise.resolve(null),
     ])
     const pickedKeys = new Set(picked.results.map(item => item.item_key))
     const traceEntities = traces.results.map(trace => ({
@@ -1095,6 +1139,7 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
       map: size,
       entities: [...entities.results.filter(row => row.kind !== 'item' || !pickedKeys.has(String(row.key))).map(row => ({
         ...row,
+        sprite: row.key === 'stream-dragonfly' && streamRelease?.released_day ? `${String(row.sprite)} linked-flight` : row.sprite,
         flat: Boolean(row.flat),
         blocks: Boolean(row.blocks),
       })), ...traceEntities, ...decorationEntities, ...gardenVisitor, ...fruitVisitor, ...feather],

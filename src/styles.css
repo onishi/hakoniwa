@@ -703,6 +703,11 @@ button {
 .map-stream-fish i:nth-child(3) { left: 51%; top: 37%; width: 25%; height: 25%; border: 2px solid #d1e9e0; border-radius: 50%; animation: pond-ripple 3s ease-out infinite; }
 .map-stream-fish.stream-cast i:nth-child(3) { border-color: #f8e0a2; opacity: 1; }
 .map-stream-fish.stream-caught i:first-child, .map-stream-fish.stream-caught i:nth-child(2) { opacity: .2; }
+.map-stream-dragonfly i:first-child { left: 43%; top: 44%; width: 12%; height: 42%; border-radius: 70% 70% 35% 35%; background: #39888a; transform: rotate(23deg); box-shadow: 0 4px 0 #2e6868; }
+.map-stream-dragonfly i:nth-child(2) { left: 20%; top: 45%; width: 62%; height: 22%; border-radius: 90% 10% 90% 10%; background: rgb(209 239 225 / 80%); box-shadow: 0 3px 0 rgb(75 137 143 / 55%); transform: rotate(-16deg); animation: dragonfly-wings .28s ease-in-out infinite alternate; }
+.map-stream-dragonfly i:nth-child(3) { left: 43%; top: 39%; width: 20%; height: 16%; border-radius: 50%; background: #367a79; }
+.map-stream-dragonfly.dragonfly-flight { animation: dragonfly-patrol 4.8s ease-in-out infinite alternate; }
+.map-stream-dragonfly.linked-flight { animation-name: dragonfly-high-flight; animation-duration: 5.2s; }
 
 .map-east-spring::before,
 .map-east-spring::after { content: ''; position: absolute; inset: 0; clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); }
@@ -955,6 +960,9 @@ button {
 
 @keyframes stream-flow { to { background-position: 26px 0; } }
 @keyframes stream-fish-swim { from { translate: -12% 8%; } to { translate: 12% -8%; } }
+@keyframes dragonfly-wings { to { scale: 1 .35; } }
+@keyframes dragonfly-patrol { from { translate: -10% -3%; } to { translate: 15% -11%; } }
+@keyframes dragonfly-high-flight { from { translate: -13% -10%; } to { translate: 17% -27%; } }
 @keyframes fish-swim {
   0%, 18% { transform: translate(-14%, 5%); }
   72%, 100% { transform: translate(45%, -18%); }
@@ -1162,12 +1170,14 @@ button:focus-visible { outline: 4px solid #fff2a8; outline-offset: 3px; }
 
 @media (prefers-reduced-motion: reduce) {
   .player { transition: none; }
-  .stream-tile::after, .map-stream-fish i, .map-pond i, .map-pond .pond-deep-fish, .map-pond .pond-bank-fish, .map-east-spring i, .map-east-waterbug i, .map-east-bird i, .map-shore-creature i, .map-garden-visitor i, .map-fruit-visitor i, .map-insect-grass i, .map-insect-meadow i, .map-striped-beetle i, .map-insect-flowers i, .map-placed-reed i, .map-lantern::before { animation: none !important; }
+  .stream-tile::after, .map-stream-fish i, .map-stream-dragonfly, .map-stream-dragonfly i, .map-pond i, .map-pond .pond-deep-fish, .map-pond .pond-bank-fish, .map-east-spring i, .map-east-waterbug i, .map-east-bird i, .map-shore-creature i, .map-garden-visitor i, .map-fruit-visitor i, .map-insect-grass i, .map-insect-meadow i, .map-striped-beetle i, .map-insect-flowers i, .map-placed-reed i, .map-lantern::before { animation: none !important; }
 }
 
 .capture-mode .map-pond i,
 .capture-mode .stream-tile::after,
 .capture-mode .map-stream-fish i,
+.capture-mode .map-stream-dragonfly,
+.capture-mode .map-stream-dragonfly i,
 .capture-mode .map-pond .pond-deep-fish,
 .capture-mode .map-pond .pond-bank-fish,
 .capture-mode .map-east-spring i,
