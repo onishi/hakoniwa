@@ -20,6 +20,12 @@ type User = { id: number; email: string; display_name: string; avatar_url: strin
 const MAP_WIDTH = 12
 const MAP_HEIGHT = 12
 const mapSize = (worldDay: number) => worldDay >= 48 ? { width: 18, height: 18 } : worldDay >= 22 ? { width: 16, height: 16 } : { width: MAP_WIDTH, height: MAP_HEIGHT }
+type TerrainTile = { kind: string; elevation: number; traversal: 'ground' | 'slope' | 'water' }
+const groundTile: TerrainTile = { kind: 'grass', elevation: 0, traversal: 'ground' }
+const terrainAt = async (env: Env, x: number, y: number, worldDay: number) =>
+  await env.DB.prepare(`SELECT kind, elevation, traversal FROM world_tiles WHERE x = ? AND y = ?
+    AND born_day <= ? AND (gone_day IS NULL OR gone_day > ?)`).bind(x, y, worldDay, worldDay)
+    .first<TerrainTile>() ?? groundTile
 
 /** The newest day that finished its work. A day still being built stays invisible. */
 const isPreview = (env: Env) => env.APP_MODE === 'day1' || env.APP_MODE === 'evolution'
@@ -611,6 +617,9 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
     if (!itemKey || !Number.isInteger(x) || !Number.isInteger(y) || x < 1 || x > size.width - 2 || y < 1 || y > size.height - 2) {
       return json({ error: 'そこには置けません。' }, 400)
     }
+    if (today.world_day >= 61 && (await terrainAt(env, x, y, today.world_day)).traversal === 'water') {
+      return json({ error: '水の中には置けません。' }, 409)
+    }
     const held = await env.DB.prepare(`SELECT player_items.item_key FROM player_items
       WHERE user_id = ? AND item_key = ? AND placed_at IS NULL`).bind(user.id, itemKey).first()
     if (!held) return json({ error: '手に持っているものがありません。' }, 409)
@@ -692,17 +701,21 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
     if (!Number.isInteger(x) || !Number.isInteger(y) || x < 1 || y < 1 || x >= size.width - 1 || y >= size.height - 1) {
       return json({ error: 'そこは庭の外です。' }, 400)
     }
-    const [occupied, path] = await Promise.all([
+    const [occupied, path, terrain] = await Promise.all([
       env.DB.prepare(`SELECT entity_key FROM world_entities WHERE x <= ? AND x + width > ? AND y <= ? AND y + height > ?
         AND born_day <= ? AND (gone_day IS NULL OR gone_day > ?) LIMIT 1`)
         .bind(x, x, y, y, today.world_day, today.world_day).first(),
       env.DB.prepare(`SELECT kind FROM world_tiles WHERE x = ? AND y = ? AND kind = 'path'
         AND born_day <= ? AND (gone_day IS NULL OR gone_day > ?) LIMIT 1`)
         .bind(x, y, today.world_day, today.world_day).first(),
+      today.world_day >= 61 ? env.DB.prepare(`SELECT kind FROM world_tiles WHERE x = ? AND y = ?
+        AND kind IN ('hill', 'slope', 'stream') AND born_day <= ? AND (gone_day IS NULL OR gone_day > ?)`)
+        .bind(x, y, today.world_day, today.world_day).first() : Promise.resolve(null),
     ])
     if (occupied || path) return json({ error: 'その場所には植えられません。' }, 409)
     const tile = await env.DB.prepare('SELECT status, seed_key, updated_at FROM player_garden_tiles WHERE user_id = ? AND x = ? AND y = ?')
       .bind(user.id, x, y).first<{ status: string; seed_key: string | null; updated_at: string }>()
+    if (terrain && !tile) return json({ error: 'この地形は庭にできません。' }, 409)
     if (!tile) {
       await env.DB.prepare(`INSERT INTO player_garden_tiles (user_id, x, y, status) VALUES (?, ?, ?, 'tilled')`).bind(user.id, x, y).run()
       return json({ ok: true, state: 'tilled', message: '土を耕しました。' })
@@ -778,6 +791,44 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
     return json({ ok: true, message: `${target.label}から${outputKey === 'item-ore' ? '石のかけら' : '木材'}を取り出しました。持ち物に残ります。` })
   }
 
+  if (url.pathname === '/api/terrain-action' && request.method === 'POST') {
+    if (request.headers.get('origin') !== url.origin) return json({ error: 'このページから操作してください。' }, 403)
+    const today = await publishedDay(env)
+    if (!today || today.world_day < 64) return json({ error: 'まだこの地形を越えられません。' }, 409)
+    const input = await request.json<{ action?: string; direction?: string; x?: number; y?: number }>()
+    const direction = input.direction === 'up' ? { x: 0, y: -1 }
+      : input.direction === 'down' ? { x: 0, y: 1 }
+      : input.direction === 'left' ? { x: -1, y: 0 }
+      : input.direction === 'right' ? { x: 1, y: 0 } : null
+    const x = Number(input.x)
+    const y = Number(input.y)
+    const size = mapSize(today.world_day)
+    if (!direction || !Number.isInteger(x) || !Number.isInteger(y) || x < 1 || y < 1 || x > size.width - 2 || y > size.height - 2) {
+      return json({ error: 'そこからは進めません。' }, 400)
+    }
+    const front = { x: x + direction.x, y: y + direction.y }
+    if (front.x < 1 || front.y < 1 || front.x > size.width - 2 || front.y > size.height - 2) return json({ error: '庭の外へは進めません。' }, 409)
+    const [here, next] = await Promise.all([terrainAt(env, x, y, today.world_day), terrainAt(env, front.x, front.y, today.world_day)])
+    let destination = front
+    if (input.action === 'cross' && next.traversal === 'water') {
+      destination = { x: front.x + direction.x, y: front.y + direction.y }
+      if (destination.x < 1 || destination.y < 1 || destination.x > size.width - 2 || destination.y > size.height - 2) return json({ error: '渡る先がありません。' }, 409)
+      const landing = await terrainAt(env, destination.x, destination.y, today.world_day)
+      if (landing.traversal === 'water' || landing.elevation !== here.elevation) return json({ error: '向こう岸には降りられません。' }, 409)
+    } else if (input.action === 'climb' && next.traversal !== 'water' && Math.abs(next.elevation - here.elevation) === 1 &&
+      (next.traversal === 'slope' || here.traversal === 'slope')) {
+      // Only the marked slope joins different heights.
+    } else return json({ error: 'ここでは登れず、渡れません。' }, 409)
+    const blocked = await env.DB.prepare(`SELECT entity_key FROM world_entities
+      WHERE blocks = 1 AND x <= ? AND x + width > ? AND y <= ? AND y + height > ?
+      AND born_day <= ? AND (gone_day IS NULL OR gone_day > ?) LIMIT 1`)
+      .bind(destination.x, destination.x, destination.y, destination.y, today.world_day, today.world_day).first()
+    if (blocked) return json({ error: '行き先がふさがっています。' }, 409)
+    return json({ position: destination, message: input.action === 'cross'
+      ? '細い小川を渡りました。向こう岸へ足を着けます。'
+      : next.elevation > here.elevation ? '斜面を登りました。丘の上が見渡せます。' : '斜面を下りました。庭の道へ戻れます。' })
+  }
+
   if (url.pathname === '/api/source-action' && request.method === 'POST') {
     if (request.headers.get('origin') !== url.origin) return json({ error: 'このページから操作してください。' }, 403)
     const user = await currentUser(request, env)
@@ -799,6 +850,10 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
     const dx = Math.max(source.x - x, 0, x - source.x - source.width + 1)
     const dy = Math.max(source.y - y, 0, y - source.y - source.height + 1)
     if (dx + dy > 1) return json({ error: 'もう少し近づいてください。' }, 409)
+    if (source.entity_key === 'source-hill-stone') {
+      const terrain = await terrainAt(env, source.x, source.y, today.world_day)
+      if (today.world_day < 65 || terrain.kind !== 'hill' || terrain.elevation !== 1) return json({ error: '丘の石はまだ採れません。' }, 409)
+    }
     if (source.entity_key === 'source-tool-shed') {
       const borrowed = await env.DB.prepare("SELECT item_key FROM player_items WHERE user_id = ? AND item_key = 'item-tool' AND placed_at IS NULL")
         .bind(user.id).first()
@@ -823,6 +878,7 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
       'source-mirror-stone': 'item-mirrorpebble',
       'source-windplant': 'item-windseed',
       'source-seed-pod': 'item-seed',
+      'source-hill-stone': 'item-ore',
     }
     const outputKey = sourceOutputs[source.entity_key] ?? 'item-sprout'
     await env.DB.prepare(`INSERT INTO player_items (user_id, item_key, quantity, first_picked_day, placed_at)
@@ -832,6 +888,7 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
       .bind(user.id, outputKey, today.world_day).run()
     return json({ ok: true, message: source.entity_key === 'source-tool-shed'
       ? '小さな道具を借りました。岩や倒木に使えます。'
+      : source.entity_key === 'source-hill-stone' ? '丘の石から石のかけらを採りました。木材と組み合わせて作業台で使えます。'
       : `${source.label}から${source.entity_key === 'source-fruit-tree' ? '実り' : '素材'}を採りました。` })
   }
 
@@ -901,7 +958,7 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
       env.DB.prepare(`SELECT entity_key AS key, kind, x, y, width, height, sprite, label, message, panel, flat, blocks
         FROM world_entities WHERE born_day <= ?1 AND (gone_day IS NULL OR gone_day > ?1) ORDER BY y, x`)
         .bind(today.world_day).all<Record<string, unknown>>(),
-      env.DB.prepare(`SELECT x, y, kind FROM world_tiles
+      env.DB.prepare(`SELECT x, y, kind, elevation, traversal FROM world_tiles
         WHERE born_day <= ?1 AND (gone_day IS NULL OR gone_day > ?1)`)
         .bind(today.world_day).all<Record<string, unknown>>(),
       viewer ? env.DB.prepare('SELECT item_key FROM player_items WHERE user_id = ?').bind(viewer.id).all<{ item_key: string }>() : Promise.resolve({ results: [] as { item_key: string }[] }),

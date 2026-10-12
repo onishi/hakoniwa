@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from 're
 
 type Position = { x: number; y: number }
 type Direction = 'up' | 'down' | 'left' | 'right'
+type Traversal = 'ground' | 'slope' | 'water'
 type Panel = 'diary' | 'wish' | 'account' | 'inventory' | 'choices' | null
 type Activity = 'fishing' | 'garden' | 'gathering' | 'observation'
 const activities: { key: Activity; label: string; hint: string }[] = [
@@ -32,7 +33,8 @@ type WorldObject = {
   blocks: boolean
 }
 
-type WorldTile = { x: number; y: number; kind: string }
+type WorldTile = { x: number; y: number; kind: string; elevation?: number; traversal?: Traversal }
+type GroundTile = Position & { path: boolean; kind: string; elevation: number; traversal: Traversal }
 
 type WorldResponse = {
   worldDay: number
@@ -77,7 +79,8 @@ type World = {
   objects: WorldObject[]
   occupiedTiles: Map<string, WorldObject>
   interactionTiles: Map<string, WorldObject>
-  groundTiles: (Position & { path: boolean; kind: string })[]
+  groundTiles: GroundTile[]
+  tileMap: Map<string, GroundTile>
   fencePoints: string
   isoUnits: (gx: number, gy: number) => { ux: number; uy: number }
 }
@@ -103,12 +106,22 @@ const buildWorld = (data: WorldResponse): World => {
     }
   }
 
-  const pathTileKeys = new Set(data.tiles.filter(tile => tile.kind === 'path').map(tile => `${tile.x},${tile.y}`))
-  const groundTiles: (Position & { path: boolean; kind: string })[] = []
-  const tileKinds = new Map(data.tiles.map(tile => [`${tile.x},${tile.y}`, tile.kind]))
+  const tileData = new Map<string, WorldTile>()
+  for (const tile of data.tiles) {
+    const key = `${tile.x},${tile.y}`
+    const prior = tileData.get(key)
+    tileData.set(key, { ...prior, ...tile, elevation: tile.elevation ?? prior?.elevation ?? 0,
+      traversal: tile.traversal ?? prior?.traversal ?? 'ground' })
+  }
+  const groundTiles: GroundTile[] = []
+  const tileMap = new Map<string, GroundTile>()
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
-      groundTiles.push({ x, y, path: pathTileKeys.has(`${x},${y}`), kind: tileKinds.get(`${x},${y}`) ?? 'grass' })
+      const tile = tileData.get(`${x},${y}`)
+      const ground = { x, y, path: tile?.kind === 'path', kind: tile?.kind ?? 'grass',
+        elevation: tile?.elevation ?? 0, traversal: tile?.traversal ?? 'ground' }
+      groundTiles.push(ground)
+      tileMap.set(`${x},${y}`, ground)
     }
   }
 
@@ -136,6 +149,7 @@ const buildWorld = (data: WorldResponse): World => {
     occupiedTiles,
     interactionTiles,
     groundTiles,
+    tileMap,
     fencePoints,
     isoUnits,
   }
@@ -202,14 +216,21 @@ function App() {
     if (!world) return
     const vector = directionVectors[nextDirection]
     setDirection(nextDirection)
-    setPosition(current => {
-      const next = { x: current.x + vector.x, y: current.y + vector.y }
-      const outsideMap = next.x < WALK_MIN || next.x > world.walkMaxX || next.y < WALK_MIN || next.y > world.walkMaxY
-
-      if (outsideMap || world.occupiedTiles.has(`${next.x},${next.y}`)) return current
-      return next
-    })
-  }, [world])
+    const next = { x: position.x + vector.x, y: position.y + vector.y }
+    const outsideMap = next.x < WALK_MIN || next.x > world.walkMaxX || next.y < WALK_MIN || next.y > world.walkMaxY
+    if (outsideMap || world.occupiedTiles.has(`${next.x},${next.y}`)) return
+    const here = world.tileMap.get(`${position.x},${position.y}`)
+    const ahead = world.tileMap.get(`${next.x},${next.y}`)
+    if (world.day >= 61 && ahead?.traversal === 'water') {
+      setMessage(world.day >= 64 ? '小川です。向こう岸へ渡るにはアクションしてください。' : '小川の水面で足が止まりました。')
+      return
+    }
+    if (world.day >= 63 && (here?.elevation ?? 0) !== (ahead?.elevation ?? 0)) {
+      setMessage(world.day >= 64 ? '段差があります。斜面に向いてアクションしてください。' : '段差は斜面から登れそうです。')
+      return
+    }
+    setPosition(next)
+  }, [position, world])
 
   const pickUp = useCallback((target: WorldObject) => {
     if (!user) {
@@ -392,6 +413,16 @@ function App() {
       }).catch(() => setMessage('観察を記録できませんでした。'))
   }, [completeActivity, position])
 
+  const terrainAction = useCallback((action: 'climb' | 'cross') => {
+    fetch('/api/terrain-action', { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action, direction, x: position.x, y: position.y }) })
+      .then(async response => ({ response, result: await response.json() as { error?: string; message?: string; position?: Position } }))
+      .then(({ response, result }) => {
+        setMessage(response.ok ? result.message ?? '' : result.error ?? 'この地形を越えられません。')
+        if (response.ok && result.position) setPosition(result.position)
+      }).catch(() => setMessage('地形を越える操作を記録できませんでした。'))
+  }, [direction, position])
+
   const insectAction = useCallback((target: 'grass' | 'meadow' | 'striped' | 'net' | 'flowers') => {
     fetch('/api/insects', {
       method: 'POST',
@@ -501,6 +532,19 @@ function App() {
       else setMessage(target.message)
       return
     }
+    if (!target && world.day >= 64) {
+      const here = world.tileMap.get(`${position.x},${position.y}`)
+      const ahead = world.tileMap.get(`${position.x + vector.x},${position.y + vector.y}`)
+      if (ahead?.traversal === 'water') {
+        terrainAction('cross')
+        return
+      }
+      if (here && ahead && here.elevation !== ahead.elevation &&
+        (here.traversal === 'slope' || ahead.traversal === 'slope')) {
+        terrainAction('climb')
+        return
+      }
+    }
     if (!target && world.day >= 17) {
       const ground = world.groundTiles.find(tile => tile.x === position.x && tile.y === position.y)
       const holdingSeed = inventory.some(item => ['item-seed', 'item-berry', 'item-sprout'].includes(item.key))
@@ -516,7 +560,7 @@ function App() {
       ? '池の中を小さな魚影が泳いでいます。'
       : target?.message ?? '柔らかな土です。けれど、植えるものはまだありません。')
     if (target?.panel) setPanel(target.panel)
-  }, [craft, direction, fishingAction, gardenAction, harvestSource, insectAction, inventory, observeEcology, observeSpring, performTool, pickUp, placeItem, position, reclaimTrace, shoreAction, world])
+  }, [craft, direction, fishingAction, gardenAction, harvestSource, insectAction, inventory, observeEcology, observeSpring, performTool, pickUp, placeItem, position, reclaimTrace, shoreAction, terrainAction, world])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -680,6 +724,9 @@ function App() {
   }
 
   const preview = mode !== 'production'
+  const footing = world?.tileMap.get(`${position.x},${position.y}`)
+  const footingName = footing?.kind === 'hill' ? '丘' : footing?.kind === 'slope' ? '斜面'
+    : footing?.kind === 'forest' ? '林' : footing?.kind === 'stream' ? '小川' : '草地'
 
   return (
     <main className={`game-shell ${captureMode ? 'capture-mode' : ''} ${world?.day && world.day >= 46 ? `phase-${dayPhase}` : ''}`}>
@@ -754,7 +801,7 @@ function App() {
       </section>
       {/* Outside the world, so scrolling the garden never moves the hand away. */}
       <div className="hud">
-        <div className="message-window" role="status" aria-live="polite"><p>{message || '\u00a0'}</p>{world?.day && world.day >= 50 && activity && <p className="activity-status">{activities.find(choice => choice.key === activity)?.label} · {activityComplete ? '達成' : '選択中'}</p>}</div>
+        <div className="message-window" role="status" aria-live="polite"><p>{message || '\u00a0'}</p>{world?.day && world.day >= 62 && <p className="terrain-status">足元: {footingName} · 高さ{footing?.elevation ?? 0}</p>}{world?.day && world.day >= 50 && activity && <p className="activity-status">{activities.find(choice => choice.key === activity)?.label} · {activityComplete ? '達成' : '選択中'}</p>}</div>
         <Controls move={move} act={act} />
       </div>
       {panel && <div className="overlay" role="presentation" onMouseDown={event => event.target === event.currentTarget && setPanel(null)}>
