@@ -1,4 +1,5 @@
 import { launch } from '@cloudflare/playwright'
+import { rainMirrorAvailable, worldClimate } from './climate'
 
 interface Env {
   ASSETS: Fetcher
@@ -1066,7 +1067,10 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
       'source-seed-pod': 'item-seed',
       'source-hill-stone': 'item-ore',
     }
-    const outputKey = sourceOutputs[source.entity_key] ?? 'item-sprout'
+    const now = new Date()
+    const climate = worldClimate(today.world_day, now)
+    const rainMirror = source.entity_key === 'source-lichen-rock' && rainMirrorAvailable(today.world_day, now)
+    const outputKey = rainMirror ? 'item-mirrorpebble' : sourceOutputs[source.entity_key] ?? 'item-sprout'
     await env.DB.prepare(`INSERT INTO player_items (user_id, item_key, quantity, first_picked_day, placed_at)
       VALUES (?, ?, 1, ?, NULL) ON CONFLICT(user_id, item_key) DO UPDATE SET
         quantity = CASE WHEN player_items.placed_at IS NULL THEN player_items.quantity + 1 ELSE 1 END,
@@ -1075,6 +1079,9 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
     return json({ ok: true, message: source.entity_key === 'source-tool-shed'
       ? '小さな道具を借りました。岩や倒木に使えます。'
       : source.entity_key === 'source-hill-stone' ? '丘の石から石のかけらを採りました。木材と組み合わせて作業台で使えます。'
+      : source.entity_key === 'source-lichen-rock' && today.world_day >= 85
+        ? rainMirror ? '雨の夕暮れの石から鏡石を採りました。持ち物から庭に置けます。'
+          : `石から地衣類を採りました。${climate.weather === 'rain' ? '雨が上がる前の明るい時間です。' : '雨の夕暮れには別のものが見つかりそうです。'}`
       : `${source.label}から${source.entity_key === 'source-fruit-tree' ? '実り' : '素材'}を採りました。` })
   }
 
@@ -1216,6 +1223,7 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
     return json({
       worldDay: today.world_day,
       oracle: today.oracle,
+      climate: today.world_day >= 81 ? worldClimate(today.world_day) : null,
       map: size,
       entities: [...entities.results.filter(row => row.kind !== 'item' || !pickedKeys.has(String(row.key))).map(row => ({
         ...row,

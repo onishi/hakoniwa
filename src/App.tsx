@@ -39,10 +39,13 @@ type GroundTile = Position & { path: boolean; kind: string; elevation: number; t
 type WorldResponse = {
   worldDay: number
   oracle: string | null
+  climate?: WorldClimate | null
   map: { width: number; height: number }
   entities: WorldObject[]
   tiles: WorldTile[]
 }
+
+type WorldClimate = { phase: 'morning' | 'evening' | 'night'; weather: 'clear' | 'cloud' | 'rain'; season: 'sprout' | 'sun' | 'harvest' | 'frost' | null; hour: number; timeZone: 'Asia/Tokyo' }
 
 const WALK_MIN = 1
 
@@ -72,6 +75,7 @@ function writeCache(key: string, value: unknown) {
 /** Everything the renderer needs for one world day, derived once per fetch. */
 type World = {
   day: number
+  climate: WorldClimate | null
   width: number
   height: number
   walkMaxX: number
@@ -141,6 +145,7 @@ const buildWorld = (data: WorldResponse): World => {
 
   return {
     day: data.worldDay,
+    climate: data.climate ?? null,
     width,
     height,
     walkMaxX,
@@ -696,6 +701,27 @@ function App() {
     }).catch(() => setReady(true))
   }, [])
 
+  const currentWorldDay = world?.day
+  useEffect(() => {
+    if (!currentWorldDay || currentWorldDay < 81 || offline) return
+    const refresh = () => {
+      if (document.visibilityState !== 'visible') return
+      fetch('/api/world').then(response => response.ok ? response.json() as Promise<WorldResponse> : null)
+        .then(data => {
+          if (data) {
+            setWorld(buildWorld(data))
+            writeCache(WORLD_CACHE, data)
+          }
+        }).catch(() => undefined)
+    }
+    const timer = window.setInterval(refresh, 60_000)
+    document.addEventListener('visibilitychange', refresh)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', refresh)
+    }
+  }, [currentWorldDay, offline])
+
   useEffect(() => {
     if (!user || !world || world.day < 5) return
     fetch('/api/inventory').then(response => response.ok ? response.json() : null).then(result => {
@@ -788,15 +814,22 @@ function App() {
   const footing = world?.tileMap.get(`${position.x},${position.y}`)
   const footingName = footing?.kind === 'hill' ? '丘' : footing?.kind === 'slope' ? '斜面'
     : footing?.kind === 'forest' ? '林' : footing?.kind === 'stream' ? '小川' : '草地'
+  const climate = world?.climate
+  const visiblePhase = climate?.phase ?? dayPhase
+  const phaseName = visiblePhase === 'morning' ? '朝' : visiblePhase === 'evening' ? '夕' : '夜'
+  const weatherName = climate?.weather === 'rain' ? '雨' : climate?.weather === 'cloud' ? '曇り' : '晴れ'
+  const seasonName = climate?.season === 'sprout' ? '芽吹き' : climate?.season === 'sun' ? '盛夏'
+    : climate?.season === 'harvest' ? '実り' : climate?.season === 'frost' ? '霜' : null
 
   return (
-    <main className={`game-shell ${captureMode ? 'capture-mode' : ''} ${world?.day && world.day >= 46 ? `phase-${dayPhase}` : ''}`}>
+    <main className={`game-shell ${captureMode ? 'capture-mode' : ''} ${world?.day && world.day >= 46 ? `phase-${visiblePhase}` : ''} ${climate && world && world.day >= 83 ? `weather-${climate.weather}` : ''} ${climate?.season && world && world.day >= 84 ? `season-${climate.season}` : ''}`}>
       {preview && <div className="preview-banner">{mode === 'day1' ? 'DAY 1 保存版' : `進化テスト · DAY ${world?.day ?? '…'}`}</div>}
       <section className="world" aria-label={world ? `はじまりの庭 Day ${world.day}` : 'はじまりの庭'}>
         <nav className="world-actions" aria-label="世界の記録">
           <button onClick={() => setPanel('diary')} aria-label="創世日記">▤</button>
           {world?.day && world.day >= 5 && <button onClick={() => { setInventoryStatus(''); setPanel('inventory') }} aria-label="持ち物">▣</button>}
-          {world?.day && world.day >= 46 && <button onClick={() => setDayPhase(current => current === 'morning' ? 'evening' : 'morning')} aria-label={`現在は${dayPhase === 'morning' ? '朝' : '夕'}。朝夕を切り替え`} title="朝夕を切り替え">{dayPhase === 'morning' ? '☀' : '☾'}</button>}
+          {world?.day && world.day >= 81 && climate && <span className="climate-badge" aria-label={`世界時刻は日本時間${climate.hour}時、${phaseName}、${weatherName}${seasonName ? `、${seasonName}` : ''}`}>{climate.hour}時 · {phaseName} · {weatherName}{seasonName ? ` · ${seasonName}` : ''}</span>}
+          {world?.day && world.day >= 46 && world.day < 81 && <button onClick={() => setDayPhase(current => current === 'morning' ? 'evening' : 'morning')} aria-label={`現在は${dayPhase === 'morning' ? '朝' : '夕'}。朝夕を切り替え`} title="朝夕を切り替え">{dayPhase === 'morning' ? '☀' : '☾'}</button>}
           {world?.day && world.day >= 50 && <button onClick={() => setPanel('choices')} aria-label="10分の遊び方を選ぶ">◈</button>}
           <button onClick={() => setPanel('account')} aria-label="アカウント">●</button>
         </nav>
