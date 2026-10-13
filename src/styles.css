@@ -736,6 +736,18 @@ button {
 .map-stream-dragonfly i:nth-child(3) { left: 43%; top: 39%; width: 20%; height: 16%; border-radius: 50%; background: #367a79; }
 .map-stream-dragonfly.dragonfly-flight { animation: dragonfly-patrol 4.8s ease-in-out infinite alternate; }
 .map-stream-dragonfly.linked-flight { animation-name: dragonfly-high-flight; animation-duration: 5.2s; }
+.map-stream-mayfly i:first-child { left: 45%; top: 43%; width: 10%; height: 33%; background: #735c47; border-radius: 50%; }
+.map-stream-mayfly i:nth-child(2), .map-stream-mayfly i:nth-child(3) { top: 28%; width: 25%; height: 33%; background: rgb(233 239 207 / 75%); border-radius: 90% 10% 90% 10%; animation: dragonfly-wings .35s ease-in-out infinite alternate; }
+.map-stream-mayfly i:nth-child(2) { left: 21%; transform: rotate(-30deg); }
+.map-stream-mayfly i:nth-child(3) { left: 55%; transform: rotate(30deg); }
+.map-stream-mayfly { animation: bird-hop 2.8s ease-in-out infinite alternate; }
+.map-mayfly-trace i:first-child, .map-mayfly-trace i:nth-child(2) { top: 52%; width: 23%; height: 24%; background: rgb(231 229 199 / 64%); border: 2px solid #a5a68d; border-radius: 90% 10% 90% 10%; }
+.map-mayfly-trace i:first-child { left: 29%; transform: rotate(-25deg); }
+.map-mayfly-trace i:nth-child(2) { left: 52%; transform: rotate(25deg); }
+.field-entry { padding: 12px 0; border-top: 3px solid #c8aa63; }
+.field-entry h2 { margin: 0 0 4px; font-size: 18px; }
+.field-entry p { margin: 5px 0; }
+.field-absent { color: #665d4c; }
 .map-hill-resident i:first-child, .map-stream-resident i:first-child { left: 36%; top: 40%; width: 29%; height: 28%; border-radius: 42% 42% 20% 20%; background: #788456; box-shadow: 0 4px 0 #506044; }
 .map-hill-resident i:nth-child(2), .map-stream-resident i:nth-child(2) { left: 39%; top: 25%; width: 23%; height: 24%; border-radius: 50%; background: #d0a678; box-shadow: inset 0 5px 0 #5a4a3c; }
 .map-hill-resident i:nth-child(3), .map-stream-resident i:nth-child(3) { left: 41%; top: 66%; width: 24%; height: 18%; background: #594f3d; clip-path: polygon(0 0, 40% 0, 46% 100%, 0 100%, 54% 0, 100% 0, 100% 100%, 53% 100%); }
@@ -1163,6 +1175,9 @@ button {
 button:focus-visible { outline: 4px solid #fff2a8; outline-offset: 3px; }
 
 @media (max-width: 720px) {
+  .world-actions { top: 12px; right: 12px; left: 12px; flex-wrap: wrap; justify-content: flex-end; }
+  .climate-badge { order: -1; flex-basis: 100%; }
+  .climate-active .preview-banner { top: 120px; }
   .pixel-map {
     /* Narrow screens scroll rather than shrink; the floor is what stays readable. */
     --tw: clamp(56px, 13vw, 96px);
@@ -1204,7 +1219,7 @@ button:focus-visible { outline: 4px solid #fff2a8; outline-offset: 3px; }
 @media (prefers-reduced-motion: reduce) {
   .player { transition: none; }
   .weather-rain .world::after { animation: none; }
-  .stream-tile::after, .map-stream-fish i, .map-stream-dragonfly, .map-stream-dragonfly i, .map-pond i, .map-pond .pond-deep-fish, .map-pond .pond-bank-fish, .map-east-spring i, .map-east-waterbug i, .map-east-bird i, .map-shore-creature i, .map-garden-visitor i, .map-fruit-visitor i, .map-insect-grass i, .map-insect-meadow i, .map-striped-beetle i, .map-insect-flowers i, .map-placed-reed i, .map-lantern::before { animation: none !important; }
+  .stream-tile::after, .map-stream-fish i, .map-stream-dragonfly, .map-stream-dragonfly i, .map-stream-mayfly, .map-stream-mayfly i, .map-pond i, .map-pond .pond-deep-fish, .map-pond .pond-bank-fish, .map-east-spring i, .map-east-waterbug i, .map-east-bird i, .map-shore-creature i, .map-garden-visitor i, .map-fruit-visitor i, .map-insect-grass i, .map-insect-meadow i, .map-striped-beetle i, .map-insect-flowers i, .map-placed-reed i, .map-lantern::before { animation: none !important; }
 }
 
 .capture-mode .map-pond i,
@@ -1213,6 +1228,8 @@ button:focus-visible { outline: 4px solid #fff2a8; outline-offset: 3px; }
 .capture-mode .map-stream-fish i,
 .capture-mode .map-stream-dragonfly,
 .capture-mode .map-stream-dragonfly i,
+.capture-mode .map-stream-mayfly,
+.capture-mode .map-stream-mayfly i,
 .capture-mode .map-pond .pond-deep-fish,
 .capture-mode .map-pond .pond-bank-fish,
 .capture-mode .map-east-spring i,

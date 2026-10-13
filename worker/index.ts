@@ -87,6 +87,33 @@ async function recordEcologyEvent(env: Env, userId: number, worldDay: number, ev
   return Boolean(result.meta.changes)
 }
 
+type FieldSubject = { subject_key: string; entity_key: string; trace_key: string | null; label: string;
+  place: string; movement: string; message_template: string; discover_day: number; observe_distance: number }
+
+const fieldNote = (subject: FieldSubject, worldDay: number) => {
+  const climate = worldClimate(worldDay)
+  const slots: Record<string, string> = {
+    subject: subject.label,
+    weather: climate.weather === 'rain' ? '雨' : climate.weather === 'cloud' ? '曇り' : '晴れ',
+    phase: climate.phase === 'morning' ? '朝' : climate.phase === 'evening' ? '夕方' : '夜',
+    place: subject.place,
+    movement: subject.movement,
+  }
+  return subject.message_template.replace(/\{(subject|weather|phase|place|movement)\}/g, (_, key: string) => slots[key])
+}
+
+async function recordFieldObservation(env: Env, userId: number, worldDay: number, subjectKey: string, fromTrace = false) {
+  if (worldDay < 88) return false
+  const subject = await env.DB.prepare('SELECT * FROM field_subjects WHERE subject_key = ? AND discover_day <= ?')
+    .bind(subjectKey, worldDay).first<FieldSubject>()
+  if (!subject) return false
+  const note = `${fromTrace ? '羽の跡から、かつてこの場所にいたことを知りました。' : ''}${fieldNote(subject, worldDay)}`
+  const result = await env.DB.prepare(`INSERT OR IGNORE INTO player_field_observations
+    (user_id, subject_key, first_seen_day, first_note) VALUES (?, ?, ?, ?)`)
+    .bind(userId, subjectKey, worldDay, note).run()
+  return Boolean(result.meta.changes)
+}
+
 const cookieValue = (request: Request, name: string) => {
   const part = request.headers.get('cookie')?.split(';').map(value => value.trim()).find(value => value.startsWith(`${name}=`))
   return part?.slice(name.length + 1)
@@ -862,6 +889,7 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
       : '細い羽のトンボが小川のそばに止まっています。' })
     const user = await currentUser(request, env)
     if (!user) return json({ message: 'トンボの飛ぶ道を見守りました。記録を始めると、次に来たときの違いがわかります。' })
+    await recordFieldObservation(env, user.id, today.world_day, 'stream-dragonfly')
     const first = await env.DB.prepare(`INSERT OR IGNORE INTO player_stream_dragonfly (user_id, first_seen_day) VALUES (?, ?)`)
       .bind(user.id, today.world_day).run()
     const record = await env.DB.prepare('SELECT first_seen_day, linked_day, revisit_day FROM player_stream_dragonfly WHERE user_id = ?')
@@ -980,6 +1008,7 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
     if (today.world_day < 68) return json({ state: 'idle', message: '細い魚影が流れに逆らって泳ぎ、石の陰へ戻りました。' })
     const user = await currentUser(request, env)
     if (!user) return json({ state: 'idle', message: '魚影を見守りました。記録を始めると、また来たときに通り道を比べられます。' })
+    await recordFieldObservation(env, user.id, today.world_day, 'stream-fish')
     const observed = await env.DB.prepare(`INSERT OR IGNORE INTO player_stream_fishing
       (user_id, first_seen_day, world_day) VALUES (?, ?, ?)`)
       .bind(user.id, today.world_day, today.world_day).run()
@@ -1014,6 +1043,50 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
         message: '魚を小川へ戻しました。細い影が流れをさかのぼり、石の陰へ消えます。' })
     }
     return json({ error: 'もう一度、魚影を見てください。' }, 409)
+  }
+
+  if (url.pathname === '/api/field-guide' && request.method === 'GET') {
+    const today = await publishedDay(env)
+    if (!today || today.world_day < 89) return json({ entries: [] })
+    const user = await currentUser(request, env)
+    if (!user) return json({ entries: [] })
+    const entries = await env.DB.prepare(`SELECT subjects.subject_key AS key, subjects.label,
+      observations.first_seen_day AS firstSeenDay, observations.first_note AS note,
+      CASE WHEN entities.gone_day IS NOT NULL AND entities.gone_day <= ? THEN 1 ELSE 0 END AS absent
+      FROM player_field_observations AS observations
+      JOIN field_subjects AS subjects ON subjects.subject_key = observations.subject_key
+      JOIN world_entities AS entities ON entities.entity_key = subjects.entity_key
+      WHERE observations.user_id = ? ORDER BY observations.first_seen_day, subjects.subject_key`)
+      .bind(today.world_day, user.id).all()
+    return json({ entries: entries.results.map(row => ({ ...row, absent: Boolean(row.absent) })) })
+  }
+
+  if (url.pathname === '/api/field-observe' && request.method === 'POST') {
+    if (request.headers.get('origin') !== url.origin) return json({ error: 'このページから操作してください。' }, 403)
+    const today = await publishedDay(env)
+    if (!today || today.world_day < 86) return json({ error: '羽虫はまだいません。' }, 409)
+    const input = await request.json<{ key?: string; x?: number; y?: number }>()
+    if (input.key !== 'stream-mayfly' && input.key !== 'mayfly-trace') return json({ error: '観察するものを選んでください。' }, 400)
+    const subject = await env.DB.prepare("SELECT * FROM field_subjects WHERE subject_key = 'stream-mayfly'").first<FieldSubject>()
+    if (!subject) return json({ error: '観察対象がありません。' }, 404)
+    const currentKey = input.key
+    const fromTrace = currentKey === subject.trace_key
+    const entity = await env.DB.prepare(`SELECT x, y FROM world_entities WHERE entity_key = ?
+      AND born_day <= ? AND (gone_day IS NULL OR gone_day > ?)`).bind(currentKey, today.world_day, today.world_day)
+      .first<{ x: number; y: number }>()
+    if (!entity) return json({ error: '今はそこに姿がありません。' }, 404)
+    const x = Number(input.x)
+    const y = Number(input.y)
+    const size = mapSize(today.world_day)
+    if (!Number.isInteger(x) || !Number.isInteger(y) || x < 1 || y < 1 || x >= size.width - 1 || y >= size.height - 1 ||
+      Math.abs(x - entity.x) + Math.abs(y - entity.y) > subject.observe_distance) {
+      return json({ error: 'もう少し近づいてください。' }, 409)
+    }
+    const user = await currentUser(request, env)
+    const discovered = user ? await recordFieldObservation(env, user.id, today.world_day, subject.subject_key, fromTrace) : false
+    return json({ observed: Boolean(user && today.world_day >= 88), discovered,
+      message: fromTrace ? `羽虫の姿は見えません。${discovered ? '羽の跡から、かつていたことを図鑑に残しました。' : '水辺に薄い羽の跡があります。'}`
+        : `${fieldNote(subject, today.world_day)}${discovered ? ' 初めての発見を図鑑に残しました。' : ''}` })
   }
 
   if (url.pathname === '/api/source-action' && request.method === 'POST') {
