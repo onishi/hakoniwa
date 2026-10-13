@@ -13,6 +13,13 @@ const activities: { key: Activity; label: string; hint: string }[] = [
 ]
 /** A day the god stayed silent still has an entry; its body is simply missing. */
 type DiaryEntry = { worldDay: number; body: string | null; screenshotUrl: string | null }
+const diaryThemes = [
+  { key: 'all', label: 'すべて', pattern: /./ },
+  { key: 'water', label: '水辺', pattern: /池|水|泉|川|小川|魚|釣|葦|雨/ },
+  { key: 'life', label: '生き物', pattern: /虫|鳥|獣|生き物|羽|巣|訪問者|トンボ/ },
+  { key: 'garden', label: '庭と素材', pattern: /庭|花|草|木|土|芽|実|種|素材|作業台/ },
+  { key: 'journey', label: '旅', pattern: /道|外|草原|旅|帰|歩|丘|東/ },
+] as const
 type SessionUser = { name: string; avatarUrl: string | null }
 type AppMode = 'production' | 'day1' | 'evolution'
 type HabitatCare = { preparedDay: number; flowerColor: 'white' | 'yellow'; revisited: boolean }
@@ -180,6 +187,8 @@ function App() {
   const [diary, setDiary] = useState<DiaryEntry[]>([
     { worldDay: 1, body: '土と木と池を創りました。あなたが来てくれて、うれしい。', screenshotUrl: null },
   ])
+  const [diaryTheme, setDiaryTheme] = useState<(typeof diaryThemes)[number]['key']>('all')
+  const [diaryQuery, setDiaryQuery] = useState('')
   const [wish, setWish] = useState('')
   const [wishStatus, setWishStatus] = useState('')
   const [publicConsent, setPublicConsent] = useState(false)
@@ -303,7 +312,8 @@ function App() {
     const byPond = position.x >= 6 && position.x <= 9 && position.y >= 6 && position.y <= 9
     const item = world.day >= 38 && byPond ? inventory.find(entry => entry.key === 'item-reed')
       ?? inventory.find(entry => entry.key === 'item-lantern') ?? inventory[0]
-      : world.day >= 29 ? inventory.find(entry => entry.key === 'item-lantern') ?? inventory[0] : inventory[0]
+      : world.day >= 29 ? inventory.find(entry => entry.key === 'item-field-bundle')
+        ?? inventory.find(entry => entry.key === 'item-lantern') ?? inventory[0] : inventory[0]
     fetch('/api/place', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ itemKey: item.key, x: position.x, y: position.y }),
@@ -662,8 +672,9 @@ function App() {
         (world.day >= 79 && item.key === 'item-windseed'))
       const gardenTile = ground && ['tilled', 'planted', 'watered', 'grown'].includes(ground.kind)
       const holdingLantern = world.day >= 29 && inventory.some(item => item.key === 'item-lantern')
+      const holdingFieldBundle = world.day >= 96 && inventory.some(item => item.key === 'item-field-bundle')
       const holdingReed = world.day >= 38 && inventory.some(item => item.key === 'item-reed')
-      if (!gardenTile && (holdingLantern || holdingReed || ground?.kind === 'path' || (!holdingSeed && inventory.length > 0))) {
+      if (!gardenTile && (holdingLantern || holdingFieldBundle || holdingReed || ground?.kind === 'path' || (!holdingSeed && inventory.length > 0))) {
         if (placeItem()) return
       } else if (gardenAction()) return
     }
@@ -967,7 +978,18 @@ function App() {
           <button className="close-button" onClick={() => setPanel(null)} aria-label="閉じる">×</button>
           {panel === 'diary' && <>
             <h1>創世日記</h1>
-            {diary.map(entry => <article className="diary-entry" key={entry.worldDay}>
+            {world?.day && world.day >= 98 && <div className="diary-filter">
+              <p className="small-text">関心のあるものから、過去の変化を辿れます。</p>
+              <div className="diary-themes">{diaryThemes.map(theme => <button key={theme.key}
+                className={diaryTheme === theme.key ? 'selected' : ''}
+                onClick={() => setDiaryTheme(theme.key)}>{theme.label}</button>)}</div>
+              <input type="search" value={diaryQuery} onChange={event => setDiaryQuery(event.target.value)}
+                placeholder="日記を検索" aria-label="創世日記を検索" />
+            </div>}
+            {diary.filter(entry => world?.day && world.day >= 98
+              ? (diaryTheme === 'all' || diaryThemes.find(theme => theme.key === diaryTheme)!.pattern.test(entry.body ?? ''))
+                && (diaryQuery.trim() === '' || `DAY ${entry.worldDay} ${entry.body ?? ''}`.includes(diaryQuery.trim()))
+              : true).map(entry => <article className="diary-entry" key={entry.worldDay}>
               <p className="entry-meta">DAY {entry.worldDay}</p>
               {entry.screenshotUrl && <img src={entry.screenshotUrl} alt={`DAY ${entry.worldDay}の世界`} />}
               {entry.body ? <p>{entry.body}</p> : <p className="entry-silence">この日、神は何も創らなかった。</p>}
