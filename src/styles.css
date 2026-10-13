@@ -196,6 +196,7 @@ button {
 .path-tile { background: #c8a96c; }
 .wetland-tile { background: repeating-linear-gradient(145deg, #669c81 0 7px, #79b6a0 8px 12px); }
 .forest-tile { background: repeating-linear-gradient(145deg, #64894b 0 8px, #719951 9px 13px); }
+.field-tile { background: repeating-linear-gradient(135deg, #b5b879 0 9px, #a5ad6d 10px 18px, #8fa36c 19px 24px); }
 .hill-tile { background: linear-gradient(155deg, #c5bd80 0 45%, #899c61 46% 72%, #697f52 73%); box-shadow: inset 0 -7px 0 #5c6f49; }
 .slope-tile { background: repeating-linear-gradient(145deg, #b7aa74 0 7px, #968a62 8px 12px); box-shadow: inset 0 -3px 0 #6b7750; }
 .stream-tile { background: repeating-linear-gradient(26.565deg, #83b9c1 0 4px, #579cae 5px 12px, #3d819b 13px 17px); }
@@ -753,6 +754,18 @@ button {
 .map-hill-resident i:nth-child(3), .map-stream-resident i:nth-child(3) { left: 41%; top: 66%; width: 24%; height: 18%; background: #594f3d; clip-path: polygon(0 0, 40% 0, 46% 100%, 0 100%, 54% 0, 100% 0, 100% 100%, 53% 100%); }
 .map-stream-resident i:first-child { background: #527d82; box-shadow: 0 4px 0 #365d65; }
 .map-stream-resident i:nth-child(2) { box-shadow: inset 0 5px 0 #3d5860; }
+.map-field-marker i:first-child { left: 46%; top: 34%; width: 9%; height: 55%; background: #664831; }
+.map-field-marker i:nth-child(2) { left: 26%; top: 27%; width: 55%; height: 17%; background: #b69862; border: 2px solid #6b5038; }
+.map-field-marker i:nth-child(3) { left: 68%; top: 31%; width: 14%; height: 9%; background: #b69862; clip-path: polygon(0 0, 100% 50%, 0 100%); }
+.map-field-stray i:first-child { left: 18%; top: 47%; width: 62%; height: 34%; border-radius: 45% 50% 26% 30%; background: #846a51; box-shadow: 0 5px 0 #5b473b; }
+.map-field-stray i:nth-child(2) { left: 54%; top: 32%; width: 28%; height: 31%; border-radius: 40%; background: #927457; animation: stray-scan 2.2s ease-in-out infinite alternate; }
+.map-field-stray i:nth-child(3) { left: 65%; top: 25%; width: 12%; height: 20%; background: #594537; clip-path: polygon(50% 0, 100% 100%, 0 100%); animation: stray-scan 2.2s ease-in-out infinite alternate; }
+.map-field-stray.field-calmed i:nth-child(2), .map-field-stray.field-calmed i:nth-child(3) { animation: none; }
+.map-field-stray.field-calmed { opacity: .75; }
+@keyframes stray-scan { to { transform: translateX(-18%); } }
+.expedition-status { font-size: 13px; }
+.encounter-options { display: flex; gap: 8px; margin-top: 8px; }
+.encounter-options button { padding: 4px 10px; border: 2px solid #29251f; background: #385342; color: #f6edcf; cursor: pointer; }
 
 .map-east-spring::before,
 .map-east-spring::after { content: ''; position: absolute; inset: 0; clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); }
@@ -1219,7 +1232,7 @@ button:focus-visible { outline: 4px solid #fff2a8; outline-offset: 3px; }
 @media (prefers-reduced-motion: reduce) {
   .player { transition: none; }
   .weather-rain .world::after { animation: none; }
-  .stream-tile::after, .map-stream-fish i, .map-stream-dragonfly, .map-stream-dragonfly i, .map-stream-mayfly, .map-stream-mayfly i, .map-pond i, .map-pond .pond-deep-fish, .map-pond .pond-bank-fish, .map-east-spring i, .map-east-waterbug i, .map-east-bird i, .map-shore-creature i, .map-garden-visitor i, .map-fruit-visitor i, .map-insect-grass i, .map-insect-meadow i, .map-striped-beetle i, .map-insect-flowers i, .map-placed-reed i, .map-lantern::before { animation: none !important; }
+  .stream-tile::after, .map-stream-fish i, .map-stream-dragonfly, .map-stream-dragonfly i, .map-stream-mayfly, .map-stream-mayfly i, .map-field-stray i, .map-pond i, .map-pond .pond-deep-fish, .map-pond .pond-bank-fish, .map-east-spring i, .map-east-waterbug i, .map-east-bird i, .map-shore-creature i, .map-garden-visitor i, .map-fruit-visitor i, .map-insect-grass i, .map-insect-meadow i, .map-striped-beetle i, .map-insect-flowers i, .map-placed-reed i, .map-lantern::before { animation: none !important; }
 }
 
 .capture-mode .map-pond i,
@@ -1230,6 +1243,7 @@ button:focus-visible { outline: 4px solid #fff2a8; outline-offset: 3px; }
 .capture-mode .map-stream-dragonfly i,
 .capture-mode .map-stream-mayfly,
 .capture-mode .map-stream-mayfly i,
+.capture-mode .map-field-stray i,
 .capture-mode .map-pond .pond-deep-fish,
 .capture-mode .map-pond .pond-bank-fish,
 .capture-mode .map-east-spring i,

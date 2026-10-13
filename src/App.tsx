@@ -17,6 +17,8 @@ type SessionUser = { name: string; avatarUrl: string | null }
 type AppMode = 'production' | 'day1' | 'evolution'
 type HabitatCare = { preparedDay: number; flowerColor: 'white' | 'yellow'; revisited: boolean }
 type FieldEntry = { key: string; label: string; firstSeenDay: number; note: string; absent: boolean }
+type ExpeditionState = { hp: number; maxHp: number; trips: number; readiness: boolean;
+  inside: boolean; encounter: 'idle' | 'active'; calmed: boolean; defeats: number }
 
 type WorldObject = {
   key: string
@@ -200,6 +202,7 @@ function App() {
   const [gardenVisitSeen, setGardenVisitSeen] = useState(false)
   const [todayEcologyEvents, setTodayEcologyEvents] = useState<string[]>([])
   const [fieldEntries, setFieldEntries] = useState<FieldEntry[]>([])
+  const [expedition, setExpedition] = useState<ExpeditionState | null>(null)
   const [insectState, setInsectState] = useState<'free' | 'held'>('free')
   const [insectReleased, setInsectReleased] = useState(false)
   const [flowerTended, setFlowerTended] = useState(false)
@@ -220,13 +223,41 @@ function App() {
     if (activity === kind) setActivityComplete(true)
   }, [activity])
 
+  const travelAction = useCallback((action: 'enter' | 'return' | 'contact' | 'avoid' | 'calm', at: Position) => {
+    if (!user) {
+      setMessage('外の旅を記録するには、まず記録を始めてください。')
+      return
+    }
+    fetch('/api/expedition', { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action, x: at.x, y: at.y }) })
+      .then(async response => ({ response, result: await response.json() as {
+        error?: string; message?: string; expedition?: ExpeditionState; returnTo?: Position | null,
+      } }))
+      .then(({ response, result }) => {
+        setMessage(response.ok ? result.message ?? '' : result.error ?? '旅を記録できませんでした。')
+        if (!response.ok) return
+        if (result.expedition) setExpedition(result.expedition)
+        if (result.returnTo) setPosition(result.returnTo)
+      }).catch(() => setMessage('旅を記録できませんでした。'))
+  }, [user])
+
   const move = useCallback((nextDirection: Direction) => {
     if (!world) return
     const vector = directionVectors[nextDirection]
     setDirection(nextDirection)
     const next = { x: position.x + vector.x, y: position.y + vector.y }
     const outsideMap = next.x < WALK_MIN || next.x > world.walkMaxX || next.y < WALK_MIN || next.y > world.walkMaxY
-    if (outsideMap || world.occupiedTiles.has(`${next.x},${next.y}`)) return
+    if (outsideMap) return
+    const obstacle = world.occupiedTiles.get(`${next.x},${next.y}`)
+    if (obstacle?.key === 'field-stray' && world.day >= 93) {
+      travelAction('contact', position)
+      return
+    }
+    if (obstacle) return
+    if (expedition?.encounter === 'active') {
+      setMessage('獣が目の前にいます。まず離れるか鎮めるかを選んでください。')
+      return
+    }
     const here = world.tileMap.get(`${position.x},${position.y}`)
     const ahead = world.tileMap.get(`${next.x},${next.y}`)
     if (world.day >= 61 && ahead?.traversal === 'water') {
@@ -238,7 +269,9 @@ function App() {
       return
     }
     setPosition(next)
-  }, [position, world])
+    if (world.day >= 92 && next.x >= 17 && (!expedition?.inside || position.x < 17)) travelAction('enter', next)
+    if (world.day >= 92 && next.x < 17 && position.x >= 17) travelAction('return', next)
+  }, [expedition, position, travelAction, world])
 
   const pickUp = useCallback((target: WorldObject) => {
     if (!user) {
@@ -556,6 +589,10 @@ function App() {
       observeMayfly(target.key)
       return
     }
+    if (target?.key === 'field-stray' && world.day >= 93) {
+      travelAction('contact', position)
+      return
+    }
     if (target && (target.key === 'hill-resident' || target.key === 'stream-resident') && world.day >= 76) {
       residentAction(target.key)
       return
@@ -635,7 +672,7 @@ function App() {
       ? '池の中を小さな魚影が泳いでいます。'
       : target?.message ?? '柔らかな土です。けれど、植えるものはまだありません。')
     if (target?.panel) setPanel(target.panel)
-  }, [craft, direction, fishingAction, gardenAction, harvestSource, insectAction, inventory, observeEcology, observeMayfly, observeSpring, observeStreamDragonfly, performTool, pickUp, placeItem, position, reclaimTrace, residentAction, shoreAction, streamFishingAction, terrainAction, world])
+  }, [craft, direction, fishingAction, gardenAction, harvestSource, insectAction, inventory, observeEcology, observeMayfly, observeSpring, observeStreamDragonfly, performTool, pickUp, placeItem, position, reclaimTrace, residentAction, shoreAction, streamFishingAction, terrainAction, travelAction, world])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -763,6 +800,12 @@ function App() {
   }, [user, world, offline])
 
   useEffect(() => {
+    if (!user || !currentWorldDay || currentWorldDay < 92 || offline) return
+    fetch('/api/expedition').then(response => response.ok ? response.json() : null)
+      .then(result => { if (result?.expedition) setExpedition(result.expedition) }).catch(() => undefined)
+  }, [user, currentWorldDay, offline])
+
+  useEffect(() => {
     if (!user || !world || world.day < 45 || offline) return
     refreshHabitatCare()
   }, [user, world, offline, refreshHabitatCare])
@@ -879,7 +922,7 @@ function App() {
             return (
               <div
                 key={object.key}
-                className={`map-object ${object.sprite} ${object.flat ? 'is-flat' : ''} ${object.key === 'stream-dragonfly' && world.day >= 72 ? 'dragonfly-flight' : ''} ${object.key === 'stream-fish' ? `stream-${streamFishingState}` : ''} ${object.key === 'pond' && world.day >= 2 ? 'pond-awake' : ''} ${object.key === 'pond' && world.day >= 3 ? 'pond-fish' : ''} ${object.key === 'pond' && world.day >= 31 ? 'pond-shallows' : ''} ${object.key === 'pond' && world.day >= 32 ? 'pond-two-fish' : ''} ${object.key === 'pond' && world.day >= 34 ? 'pond-after-rain' : ''} ${object.key === 'pond' && world.day >= 43 ? 'pond-third-fish' : ''} ${object.key === 'pond' && fishingState === 'cast' ? 'pond-cast' : ''} ${object.key === 'pond' && fishingState === 'caught' ? 'pond-caught' : ''} ${object.key === 'insect-grass' && insectState === 'held' ? 'bug-held' : ''} ${object.key === 'insect-flowers' && (flowerTended || insectReleased) ? 'flower-attracted' : ''} ${object.key === 'insect-flowers' && world.day >= 36 ? `flower-${flowerColor}` : ''} ${object.key === 'shore-creature' && world.day >= 39 && Math.abs(position.x - object.x) + Math.abs(position.y - object.y) <= 1 ? position.y < object.y ? 'shore-calm' : 'shore-wary' : ''}`}
+                className={`map-object ${object.sprite} ${object.flat ? 'is-flat' : ''} ${object.key === 'field-stray' && expedition?.calmed ? 'field-calmed' : ''} ${object.key === 'stream-dragonfly' && world.day >= 72 ? 'dragonfly-flight' : ''} ${object.key === 'stream-fish' ? `stream-${streamFishingState}` : ''} ${object.key === 'pond' && world.day >= 2 ? 'pond-awake' : ''} ${object.key === 'pond' && world.day >= 3 ? 'pond-fish' : ''} ${object.key === 'pond' && world.day >= 31 ? 'pond-shallows' : ''} ${object.key === 'pond' && world.day >= 32 ? 'pond-two-fish' : ''} ${object.key === 'pond' && world.day >= 34 ? 'pond-after-rain' : ''} ${object.key === 'pond' && world.day >= 43 ? 'pond-third-fish' : ''} ${object.key === 'pond' && fishingState === 'cast' ? 'pond-cast' : ''} ${object.key === 'pond' && fishingState === 'caught' ? 'pond-caught' : ''} ${object.key === 'insect-grass' && insectState === 'held' ? 'bug-held' : ''} ${object.key === 'insect-flowers' && (flowerTended || insectReleased) ? 'flower-attracted' : ''} ${object.key === 'insect-flowers' && world.day >= 36 ? `flower-${flowerColor}` : ''} ${object.key === 'shore-creature' && world.day >= 39 && Math.abs(position.x - object.x) + Math.abs(position.y - object.y) <= 1 ? position.y < object.y ? 'shore-calm' : 'shore-wary' : ''}`}
                 style={{
                   '--ux': ux,
                   '--uy': uy,
@@ -916,7 +959,7 @@ function App() {
       </section>
       {/* Outside the world, so scrolling the garden never moves the hand away. */}
       <div className="hud">
-        <div className="message-window" role="status" aria-live="polite"><p>{message || '\u00a0'}</p>{world?.day && world.day >= 62 && <p className="terrain-status">足元: {footingName} · 高さ{footing?.elevation ?? 0}</p>}{world?.day && world.day >= 50 && activity && <p className="activity-status">{activities.find(choice => choice.key === activity)?.label} · {activityComplete ? '達成' : '選択中'}</p>}</div>
+        <div className="message-window" role="status" aria-live="polite"><p>{message || '\u00a0'}</p>{world?.day && world.day >= 62 && <p className="terrain-status">足元: {footingName} · 高さ{footing?.elevation ?? 0}</p>}{world?.day && world.day >= 92 && expedition && <p className="expedition-status">体力 {expedition.hp}/{expedition.maxHp} · {expedition.readiness ? '道に慣れた' : '旅のはじまり'}{expedition.calmed ? ' · 獣は落ち着いている' : ''}</p>}{world?.day && world.day >= 50 && activity && <p className="activity-status">{activities.find(choice => choice.key === activity)?.label} · {activityComplete ? '達成' : '選択中'}</p>}{expedition?.encounter === 'active' && <div className="encounter-options"><button onClick={() => travelAction('avoid', position)}>離れる</button>{world?.day && world.day >= 94 && <button onClick={() => travelAction('calm', position)}>鎮める</button>}</div>}</div>
         <Controls move={move} act={act} />
       </div>
       {panel && <div className="overlay" role="presentation" onMouseDown={event => event.target === event.currentTarget && setPanel(null)}>

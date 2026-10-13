@@ -20,7 +20,8 @@ type User = { id: number; email: string; display_name: string; avatar_url: strin
 // The first expansion opens on Day 22; the later small region opens on Day 48.
 const MAP_WIDTH = 12
 const MAP_HEIGHT = 12
-const mapSize = (worldDay: number) => worldDay >= 48 ? { width: 18, height: 18 } : worldDay >= 22 ? { width: 16, height: 16 } : { width: MAP_WIDTH, height: MAP_HEIGHT }
+const mapSize = (worldDay: number) => worldDay >= 91 ? { width: 22, height: 18 }
+  : worldDay >= 48 ? { width: 18, height: 18 } : worldDay >= 22 ? { width: 16, height: 16 } : { width: MAP_WIDTH, height: MAP_HEIGHT }
 type TerrainTile = { kind: string; elevation: number; traversal: 'ground' | 'slope' | 'water' }
 const groundTile: TerrainTile = { kind: 'grass', elevation: 0, traversal: 'ground' }
 const terrainAt = async (env: Env, x: number, y: number, worldDay: number) =>
@@ -114,6 +115,16 @@ async function recordFieldObservation(env: Env, userId: number, worldDay: number
   return Boolean(result.meta.changes)
 }
 
+type ExpeditionRecord = { hp: number; trips: number; readiness: number; inside: number;
+  encounter: 'idle' | 'active'; calmed_day: number | null; defeats: number }
+
+const expeditionView = (row: ExpeditionRecord | null) => ({ hp: row?.hp ?? 3, maxHp: 3,
+  trips: row?.trips ?? 0, readiness: Boolean(row?.readiness), inside: Boolean(row?.inside),
+  encounter: row?.encounter ?? 'idle', calmed: Boolean(row?.calmed_day), defeats: row?.defeats ?? 0 })
+
+const readExpedition = (env: Env, userId: number) => env.DB.prepare(`SELECT hp, trips, readiness, inside,
+  encounter, calmed_day, defeats FROM player_expeditions WHERE user_id = ?`).bind(userId).first<ExpeditionRecord>()
+
 const cookieValue = (request: Request, name: string) => {
   const part = request.headers.get('cookie')?.split(';').map(value => value.trim()).find(value => value.startsWith(`${name}=`))
   return part?.slice(name.length + 1)
@@ -186,6 +197,78 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
   if (url.pathname === '/api/session' && request.method === 'GET') {
     const user = await currentUser(request, env)
     return json({ user: user ? { name: user.display_name, avatarUrl: user.avatar_url } : null, mode: env.APP_MODE ?? 'production' })
+  }
+
+  if (url.pathname === '/api/expedition') {
+    const today = await publishedDay(env)
+    if (!today || today.world_day < 92) return json({ error: '外の旅はまだ始まっていません。' }, 409)
+    const user = await currentUser(request, env)
+    if (!user) return json({ error: '旅の記録を始めてください。' }, 401)
+    if (request.method === 'GET') return json({ expedition: expeditionView(await readExpedition(env, user.id)) })
+    if (request.method !== 'POST') return json({ error: '操作できません。' }, 405)
+    if (request.headers.get('origin') !== url.origin) return json({ error: 'このページから操作してください。' }, 403)
+    const input = await request.json<{ action?: string; x?: number; y?: number }>()
+    const x = Number(input.x)
+    const y = Number(input.y)
+    const size = mapSize(today.world_day)
+    if (!Number.isInteger(x) || !Number.isInteger(y) || x < 1 || x >= size.width - 1 || y < 1 || y >= size.height - 1) {
+      return json({ error: 'そこからは旅を記録できません。' }, 400)
+    }
+    await env.DB.prepare('INSERT OR IGNORE INTO player_expeditions (user_id) VALUES (?)').bind(user.id).run()
+    const current = await readExpedition(env, user.id)
+    if (input.action === 'enter') {
+      if (x < 17) return json({ error: '村の外へ出てください。' }, 409)
+      if (!current?.inside) await env.DB.prepare(`UPDATE player_expeditions SET inside = 1, entered_day = ?,
+        updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND inside = 0`).bind(today.world_day, user.id).run()
+      return json({ expedition: expeditionView(await readExpedition(env, user.id)),
+        message: current?.inside ? '草原を歩いています。' : '村の外へ出ました。戻る道も見えています。' })
+    }
+    if (input.action === 'return') {
+      if (x >= 17) return json({ error: '村の道へ戻ってください。' }, 409)
+      if (current?.inside) await env.DB.prepare(`UPDATE player_expeditions SET inside = 0, trips = trips + 1,
+        readiness = 1, hp = 3, encounter = 'idle', updated_at = CURRENT_TIMESTAMP
+        WHERE user_id = ? AND inside = 1`).bind(user.id).run()
+      return json({ expedition: expeditionView(await readExpedition(env, user.id)),
+        message: current?.inside ? '村へ戻りました。道に慣れ、体力が戻りました。' : '村の道にいます。' })
+    }
+    if (input.action === 'contact') {
+      if (today.world_day < 93) return json({ error: '草原に相手はいません。' }, 409)
+      const enemy = await env.DB.prepare(`SELECT x, y FROM world_entities WHERE entity_key = 'field-stray'
+        AND born_day <= ? AND (gone_day IS NULL OR gone_day > ?)`).bind(today.world_day, today.world_day)
+        .first<{ x: number; y: number }>()
+      if (!enemy || !current?.inside || Math.abs(x - enemy.x) + Math.abs(y - enemy.y) > 1) {
+        return json({ error: '獣は近くにいません。' }, 409)
+      }
+      if (current.calmed_day) return json({ expedition: expeditionView(current), message: '獣は落ち着いて道の脇にいます。' })
+      if (current.encounter === 'active') return json({ expedition: expeditionView(current), message: '獣が目の前にいます。離れる道を選べます。' })
+      const changed = await env.DB.prepare(`UPDATE player_expeditions SET
+        hp = CASE WHEN hp <= 1 THEN 3 ELSE hp - 1 END,
+        encounter = CASE WHEN hp <= 1 THEN 'idle' ELSE 'active' END,
+        defeats = defeats + CASE WHEN hp <= 1 THEN 1 ELSE 0 END,
+        inside = CASE WHEN hp <= 1 THEN 0 ELSE inside END,
+        updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND inside = 1 AND encounter = 'idle'
+        RETURNING hp, trips, readiness, inside, encounter, calmed_day, defeats`)
+        .bind(user.id).first<ExpeditionRecord>()
+      if (!changed) return json({ error: 'もう一度、周りを見てください。' }, 409)
+      const defeated = changed.inside === 0
+      return json({ expedition: expeditionView(changed), defeated,
+        returnTo: defeated ? { x: 16, y: 10 } : null,
+        message: defeated ? '力尽き、村の入口へ戻りました。持ち物はそのまま、体力も戻っています。'
+          : '獣と出会い、体力が1減りました。離れるか、道を変えて進めます。' })
+    }
+    if (input.action === 'avoid' || input.action === 'calm') {
+      if (input.action === 'calm' && today.world_day < 94) return json({ error: 'まだ鎮める方法がわかりません。' }, 409)
+      const changed = await env.DB.prepare(`UPDATE player_expeditions SET encounter = 'idle',
+        calmed_day = CASE WHEN ? = 'calm' THEN COALESCE(calmed_day, ?) ELSE calmed_day END,
+        updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND inside = 1 AND encounter = 'active'
+        RETURNING hp, trips, readiness, inside, encounter, calmed_day, defeats`)
+        .bind(input.action, today.world_day, user.id).first<ExpeditionRecord>()
+      if (!changed) return json({ error: '向き合っている相手はいません。' }, 409)
+      return json({ expedition: expeditionView(changed), message: input.action === 'calm'
+        ? '声を落として待つと、獣は道の脇で落ち着きました。もう傷つけられません。'
+        : '獣から離れました。別の道を通れば接触を避けられます。' })
+    }
+    return json({ error: 'その行動はできません。' }, 400)
   }
 
   if (url.pathname === '/api/logout' && request.method === 'POST') {
