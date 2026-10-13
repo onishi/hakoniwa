@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from 're
 type Position = { x: number; y: number }
 type Direction = 'up' | 'down' | 'left' | 'right'
 type Traversal = 'ground' | 'slope' | 'water'
-type Panel = 'diary' | 'wish' | 'account' | 'inventory' | 'choices' | null
+type Panel = 'diary' | 'wish' | 'account' | 'inventory' | 'choices' | 'field-guide' | null
 type Activity = 'fishing' | 'garden' | 'gathering' | 'observation'
 const activities: { key: Activity; label: string; hint: string }[] = [
   { key: 'fishing', label: '釣り', hint: '池で竿を借り、魚を釣って戻す' },
@@ -16,6 +16,7 @@ type DiaryEntry = { worldDay: number; body: string | null; screenshotUrl: string
 type SessionUser = { name: string; avatarUrl: string | null }
 type AppMode = 'production' | 'day1' | 'evolution'
 type HabitatCare = { preparedDay: number; flowerColor: 'white' | 'yellow'; revisited: boolean }
+type FieldEntry = { key: string; label: string; firstSeenDay: number; note: string; absent: boolean }
 
 type WorldObject = {
   key: string
@@ -198,6 +199,7 @@ function App() {
   const [gardenSignals, setGardenSignals] = useState<{ water: boolean; flower: boolean; spring: boolean; ready: boolean } | null>(null)
   const [gardenVisitSeen, setGardenVisitSeen] = useState(false)
   const [todayEcologyEvents, setTodayEcologyEvents] = useState<string[]>([])
+  const [fieldEntries, setFieldEntries] = useState<FieldEntry[]>([])
   const [insectState, setInsectState] = useState<'free' | 'held'>('free')
   const [insectReleased, setInsectReleased] = useState(false)
   const [flowerTended, setFlowerTended] = useState(false)
@@ -419,6 +421,16 @@ function App() {
       }).catch(() => setMessage('トンボの観察を記録できませんでした。'))
   }, [completeActivity, position])
 
+  const observeMayfly = useCallback((key: 'stream-mayfly' | 'mayfly-trace') => {
+    fetch('/api/field-observe', { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ key, x: position.x, y: position.y }) })
+      .then(async response => ({ response, result: await response.json() as { error?: string; message?: string; observed?: boolean } }))
+      .then(({ response, result }) => {
+        setMessage(response.ok ? result.message ?? '' : result.error ?? '観察できませんでした。')
+        if (response.ok && result.observed) completeActivity('observation')
+      }).catch(() => setMessage('観察を記録できませんでした。'))
+  }, [completeActivity, position])
+
   const residentAction = useCallback((target: 'hill-resident' | 'stream-resident') => {
     fetch('/api/resident', { method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ target, x: position.x, y: position.y }) })
@@ -540,6 +552,10 @@ function App() {
       observeStreamDragonfly()
       return
     }
+    if ((target?.key === 'stream-mayfly' || target?.key === 'mayfly-trace') && world.day >= 86) {
+      observeMayfly(target.key)
+      return
+    }
     if (target && (target.key === 'hill-resident' || target.key === 'stream-resident') && world.day >= 76) {
       residentAction(target.key)
       return
@@ -619,7 +635,7 @@ function App() {
       ? '池の中を小さな魚影が泳いでいます。'
       : target?.message ?? '柔らかな土です。けれど、植えるものはまだありません。')
     if (target?.panel) setPanel(target.panel)
-  }, [craft, direction, fishingAction, gardenAction, harvestSource, insectAction, inventory, observeEcology, observeSpring, observeStreamDragonfly, performTool, pickUp, placeItem, position, reclaimTrace, residentAction, shoreAction, streamFishingAction, terrainAction, world])
+  }, [craft, direction, fishingAction, gardenAction, harvestSource, insectAction, inventory, observeEcology, observeMayfly, observeSpring, observeStreamDragonfly, performTool, pickUp, placeItem, position, reclaimTrace, residentAction, shoreAction, streamFishingAction, terrainAction, world])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -822,7 +838,7 @@ function App() {
     : climate?.season === 'harvest' ? '実り' : climate?.season === 'frost' ? '霜' : null
 
   return (
-    <main className={`game-shell ${captureMode ? 'capture-mode' : ''} ${world?.day && world.day >= 46 ? `phase-${visiblePhase}` : ''} ${climate && world && world.day >= 83 ? `weather-${climate.weather}` : ''} ${climate?.season && world && world.day >= 84 ? `season-${climate.season}` : ''}`}>
+    <main className={`game-shell ${captureMode ? 'capture-mode' : ''} ${climate ? 'climate-active' : ''} ${world?.day && world.day >= 46 ? `phase-${visiblePhase}` : ''} ${climate && world && world.day >= 83 ? `weather-${climate.weather}` : ''} ${climate?.season && world && world.day >= 84 ? `season-${climate.season}` : ''}`}>
       {preview && <div className="preview-banner">{mode === 'day1' ? 'DAY 1 保存版' : `進化テスト · DAY ${world?.day ?? '…'}`}</div>}
       <section className="world" aria-label={world ? `はじまりの庭 Day ${world.day}` : 'はじまりの庭'}>
         <nav className="world-actions" aria-label="世界の記録">
@@ -831,6 +847,11 @@ function App() {
           {world?.day && world.day >= 81 && climate && <span className="climate-badge" aria-label={`世界時刻は日本時間${climate.hour}時、${phaseName}、${weatherName}${seasonName ? `、${seasonName}` : ''}`}>{climate.hour}時 · {phaseName} · {weatherName}{seasonName ? ` · ${seasonName}` : ''}</span>}
           {world?.day && world.day >= 46 && world.day < 81 && <button onClick={() => setDayPhase(current => current === 'morning' ? 'evening' : 'morning')} aria-label={`現在は${dayPhase === 'morning' ? '朝' : '夕'}。朝夕を切り替え`} title="朝夕を切り替え">{dayPhase === 'morning' ? '☀' : '☾'}</button>}
           {world?.day && world.day >= 50 && <button onClick={() => setPanel('choices')} aria-label="10分の遊び方を選ぶ">◈</button>}
+          {world?.day && world.day >= 89 && <button onClick={() => {
+            setPanel('field-guide')
+            fetch('/api/field-guide').then(response => response.ok ? response.json() : null)
+              .then(data => setFieldEntries(data?.entries ?? [])).catch(() => setFieldEntries([]))
+          }} aria-label="発見した生き物の図鑑">▥</button>}
           <button onClick={() => setPanel('account')} aria-label="アカウント">●</button>
         </nav>
         {world && <div className="pixel-map" style={{ '--cols': world.width, '--rows': world.height } as CSSProperties}>
@@ -899,7 +920,7 @@ function App() {
         <Controls move={move} act={act} />
       </div>
       {panel && <div className="overlay" role="presentation" onMouseDown={event => event.target === event.currentTarget && setPanel(null)}>
-          <section className="record-window" role="dialog" aria-modal="true" aria-label={panel === 'diary' ? '創世日記' : panel === 'wish' ? '願い事' : panel === 'inventory' ? '持ち物' : panel === 'choices' ? '今日の10分' : 'アカウント'}>
+          <section className="record-window" role="dialog" aria-modal="true" aria-label={panel === 'diary' ? '創世日記' : panel === 'wish' ? '願い事' : panel === 'inventory' ? '持ち物' : panel === 'choices' ? '今日の10分' : panel === 'field-guide' ? '発見した生き物の図鑑' : 'アカウント'}>
           <button className="close-button" onClick={() => setPanel(null)} aria-label="閉じる">×</button>
           {panel === 'diary' && <>
             <h1>創世日記</h1>
@@ -947,6 +968,17 @@ function App() {
               <strong>{choice.label}</strong><span>{choice.hint}</span>
             </button>)}</div>
             {activity && <p role="status">{activities.find(choice => choice.key === activity)?.label}: {activityComplete ? '今日の一歩を達成しました。' : '選択中です。'}</p>}
+          </>}
+          {panel === 'field-guide' && <>
+            <h1>見つけた生き物</h1>
+            {!user ? <p>記録を始めると、近くで見た生き物を読み返せます。</p>
+              : fieldEntries.length === 0 ? <p>まだ記録はありません。小川の魚影や羽のある生き物を近くで見てみましょう。</p>
+                : fieldEntries.map(entry => <article className="field-entry" key={entry.key}>
+                  <h2>{entry.label}</h2>
+                  <p className="entry-meta">記録した日: DAY {entry.firstSeenDay}</p>
+                  <p>{entry.note}</p>
+                  {entry.absent && <p className="field-absent">現在は確認されていない</p>}
+                </article>)}
           </>}
           {panel === 'account' && <>
             <h1>記憶</h1>
