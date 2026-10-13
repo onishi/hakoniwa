@@ -106,6 +106,11 @@ button {
 .diary-entry img { display: block; width: 100%; margin: 10px 0; image-rendering: pixelated; }
 .entry-meta, .small-text { font-size: 13px; color: #665d4c; }
 .entry-silence { color: #6f6555; font-style: italic; }
+.diary-filter { margin: 0 0 18px; }
+.diary-themes { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 12px; }
+.diary-themes button { border: 2px solid #665d4c; padding: 6px 9px; background: #f7eed6; color: #29251f; font: inherit; cursor: pointer; }
+.diary-themes button.selected { background: #385342; color: #fff9e8; }
+.diary-filter input { box-sizing: border-box; width: 100%; border: 2px solid #665d4c; padding: 9px; background: #fffaf0; font: inherit; }
 .record-window textarea { width: 100%; min-height: 130px; resize: vertical; padding: 14px; font: inherit; border: 3px solid #665d4c; background: #fffaf0; }
 .consent { display: flex; gap: 9px; margin: 16px 0; font-size: 14px; line-height: 1.6; }
 .consent input { width: 20px; height: 20px; flex: none; }
@@ -762,6 +767,12 @@ button {
 .map-field-stray i:nth-child(3) { left: 65%; top: 25%; width: 12%; height: 20%; background: #594537; clip-path: polygon(50% 0, 100% 100%, 0 100%); animation: stray-scan 2.2s ease-in-out infinite alternate; }
 .map-field-stray.field-calmed i:nth-child(2), .map-field-stray.field-calmed i:nth-child(3) { animation: none; }
 .map-field-stray.field-calmed { opacity: .75; }
+.map-field-grass i:first-child { left: 18%; top: 45%; width: 65%; height: 42%; background: #8e9f59; border-radius: 60% 50% 25% 25%; }
+.map-field-grass i:nth-child(2) { left: 39%; top: 20%; width: 15%; height: 58%; background: #647d41; transform: rotate(-18deg); }
+.map-field-grass i:nth-child(3) { left: 60%; top: 22%; width: 13%; height: 53%; background: #6d8648; transform: rotate(23deg); }
+.map-field-bundle i:first-child { left: 17%; top: 55%; width: 68%; height: 27%; border-radius: 45%; background: #8b784e; box-shadow: 0 5px 0 #6c5939; }
+.map-field-bundle i:nth-child(2) { left: 25%; top: 39%; width: 55%; height: 25%; background: #9cab68; border-radius: 50%; }
+.map-field-bundle i:nth-child(3) { left: 46%; top: 35%; width: 10%; height: 46%; background: #bb985e; transform: rotate(70deg); }
 @keyframes stray-scan { to { transform: translateX(-18%); } }
 .expedition-status { font-size: 13px; }
 .encounter-options { display: flex; gap: 8px; margin-top: 8px; }
