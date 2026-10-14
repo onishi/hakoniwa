@@ -1313,6 +1313,21 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
     return json({ ok: true, message: `${recipe.label}を作りました。最初の庭に置けます。` })
   }
 
+  if (url.pathname.startsWith('/api/world-history/') && request.method === 'GET') {
+    const dayText = url.pathname.slice('/api/world-history/'.length)
+    if (!/^[1-9]\d*$/.test(dayText)) return json({ error: '世界日を指定してください。' }, 400)
+    const day = Number(dayText)
+    if (!Number.isSafeInteger(day)) return json({ error: '世界日を指定してください。' }, 400)
+    const row = await env.DB.prepare(`SELECT snapshots.source, snapshots.snapshot_json AS snapshotJson
+      FROM world_snapshots AS snapshots JOIN world_days AS days ON days.world_day = snapshots.world_day
+      WHERE snapshots.world_day = ? AND days.status = 'published'
+        AND (? IS NULL OR snapshots.world_day <= ?)`).bind(day, env.APP_MODE === 'day1' ? 1 : null, env.APP_MODE === 'day1' ? 1 : null)
+      .first<{ source: 'reconstructed' | 'captured'; snapshotJson: string }>()
+    if (!row) return json({ error: 'その日の記録はありません。' }, 404)
+    return json({ source: row.source, snapshot: JSON.parse(row.snapshotJson) }, 200,
+      { 'cache-control': 'public, max-age=86400' })
+  }
+
   if (url.pathname === '/api/world' && request.method === 'GET') {
     const today = await publishedDay(env)
     if (!today) return json({ error: 'まだ世界がありません。' }, 503)

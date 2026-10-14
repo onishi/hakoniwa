@@ -139,6 +139,15 @@ npx wrangler d1 execute hakoniwa-db --remote --command "SELECT world_day, status
 
 `draft` のまま残った日は、原因を直してから手で `published` にするか、行を消して翌日やり直す。**公開済みの日は書き換えない。** 訂正は新しい `creation_events` として足す。
 
+`0023_world_snapshots.sql` 以降は、`draft` から `published` への切り替えと同時に、その日の共有地図を `world_snapshots` に固定する。新しい日を手で追加するときも、まず `draft` として行と存在・地形を作り、最後に `published` へ切り替える。直接 `published` で追加するとスナップショットは作られない。移行時点ですでに公開されていた日は現在のデータから再構成し、`source=reconstructed` と明示する。
+
+過去日の共有地図は `GET /api/world-history/<日>` で取得できる。個人の庭・持ち物・痕跡、時刻による天候は含まない。復元を試す場合は応答を保存し、既存ファイルを上書きしない一時DBに読み込む。
+
+```bash
+curl -sS https://hakoniwa-evolution.wagaya.workers.dev/api/world-history/99 -o /tmp/hakoniwa-world-day99.json
+python3 scripts/restore-world-snapshot.py /tmp/hakoniwa-world-day99.json /tmp/hakoniwa-restored-day99.sqlite
+```
+
 ## 世界へ何かを足す
 
 存在を増やすのにデプロイは要らない。D1へ書き込むだけで、描画、当たり判定、観察文がまとめて変わる。
