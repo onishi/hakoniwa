@@ -55,6 +55,46 @@ type WorldResponse = {
   tiles: WorldTile[]
 }
 
+type HistorySnapshot = Pick<WorldResponse, 'worldDay' | 'map' | 'entities' | 'tiles'>
+type HistoryMapResponse = { source: 'captured' | 'reconstructed'; snapshot: HistorySnapshot }
+
+const historyTileColors: Record<string, string> = {
+  path: '#cbb17b', field: '#b8c477', forest: '#668653', hill: '#a78d6a',
+  wetland: '#81a58d', stream: '#6caab9', slope: '#9b9c70', water: '#6caab9',
+}
+
+function HistoryMap({ snapshot }: { snapshot: HistorySnapshot }) {
+  const { width, height } = snapshot.map
+  const tiles = new Map(snapshot.tiles.map(tile => [`${tile.x},${tile.y}`, tile]))
+  const project = (x: number, y: number) => ({ x: (x - y + height) * 10, y: (x + y + 1) * 5 })
+  return <svg className="history-map" viewBox={`0 0 ${(width + height) * 10} ${(width + height + 2) * 5}`}
+    role="img" aria-label={`DAY ${snapshot.worldDay}の共有地図`}>
+    <title>DAY {snapshot.worldDay}の共有地図</title>
+    {Array.from({ length: height }, (_, y) => Array.from({ length: width }, (_, x) => {
+      const center = project(x, y)
+      const tile = tiles.get(`${x},${y}`)
+      const fill = tile?.traversal === 'water' ? '#6caab9' : historyTileColors[tile?.kind ?? ''] ?? '#9fbb7d'
+      return <polygon key={`${x},${y}`} points={`${center.x},${center.y - 5} ${center.x + 10},${center.y} ${center.x},${center.y + 5} ${center.x - 10},${center.y}`}
+        fill={fill} stroke="#617b56" strokeWidth=".35" />
+    }))}
+    {snapshot.entities.filter(entity => entity.kind === 'water').flatMap(entity =>
+      Array.from({ length: entity.height }, (_, dy) => Array.from({ length: entity.width }, (_, dx) => {
+        const center = project(entity.x + dx, entity.y + dy)
+        return <polygon key={`${entity.key}-${dx}-${dy}`}
+          points={`${center.x},${center.y - 5} ${center.x + 10},${center.y} ${center.x},${center.y + 5} ${center.x - 10},${center.y}`}
+          fill="#6caab9" stroke="#417c9b" strokeWidth=".8" />
+      }))) }
+    {snapshot.entities.filter(entity => entity.x > 0 && entity.y > 0 && entity.kind !== 'water').map(entity => {
+      const center = project(entity.x + (entity.width - 1) / 2, entity.y + (entity.height - 1) / 2)
+      const fill = entity.kind === 'hazard' ? '#a05e51'
+        : entity.kind === 'creature' || entity.kind === 'resident' ? '#d9bd65' : '#395943'
+      return <circle key={entity.key} cx={center.x} cy={center.y - 2} r="3.3" fill={fill} stroke="#f5edcf" strokeWidth=".8">
+        <title>{entity.label}</title>
+      </circle>
+    })}
+  </svg>
+}
+
 type WorldClimate = { phase: 'morning' | 'evening' | 'night'; weather: 'clear' | 'cloud' | 'rain'; season: 'sprout' | 'sun' | 'harvest' | 'frost' | null; hour: number; timeZone: 'Asia/Tokyo' }
 
 const WALK_MIN = 1
@@ -189,6 +229,12 @@ function App() {
   ])
   const [diaryTheme, setDiaryTheme] = useState<(typeof diaryThemes)[number]['key']>('all')
   const [diaryQuery, setDiaryQuery] = useState('')
+  const [historyMapDay, setHistoryMapDay] = useState<number | null>(null)
+  const [historyMap, setHistoryMap] = useState<HistoryMapResponse | null>(null)
+  const [historyMapAdditions, setHistoryMapAdditions] = useState<string[]>([])
+  const [historyMapLoading, setHistoryMapLoading] = useState(false)
+  const [historyMapError, setHistoryMapError] = useState('')
+  const historyMapRequest = useRef(0)
   const [wish, setWish] = useState('')
   const [wishStatus, setWishStatus] = useState('')
   const [publicConsent, setPublicConsent] = useState(false)
@@ -231,6 +277,37 @@ function App() {
   const completeActivity = useCallback((kind: Activity) => {
     if (activity === kind) setActivityComplete(true)
   }, [activity])
+
+  const showHistoryMap = useCallback((day: number) => {
+    const request = ++historyMapRequest.current
+    if (historyMapDay === day) {
+      setHistoryMapDay(null)
+      setHistoryMap(null)
+      setHistoryMapAdditions([])
+      setHistoryMapLoading(false)
+      return
+    }
+    setHistoryMapDay(day)
+    setHistoryMap(null)
+    setHistoryMapAdditions([])
+    setHistoryMapError('')
+    setHistoryMapLoading(true)
+    const readHistory = (targetDay: number) => fetch(`/api/world-history/${targetDay}`)
+      .then(response => {
+        if (!response.ok) throw new Error('その日の地図を読み込めませんでした。')
+        return response.json() as Promise<HistoryMapResponse>
+      })
+    Promise.all([readHistory(day), day > 1 ? readHistory(day - 1).catch(() => null) : Promise.resolve(null)])
+      .then(([result, previous]) => {
+        if (historyMapRequest.current !== request) return
+        const previousKeys = new Set(previous?.snapshot.entities.map(entity => entity.key) ?? [])
+        setHistoryMap(result)
+        setHistoryMapAdditions(day === 1 || previous
+          ? result.snapshot.entities.filter(entity => !previousKeys.has(entity.key)).map(entity => entity.label) : [])
+      })
+      .catch(() => { if (historyMapRequest.current === request) setHistoryMapError('その日の地図を読み込めませんでした。') })
+      .finally(() => { if (historyMapRequest.current === request) setHistoryMapLoading(false) })
+  }, [historyMapDay])
 
   const travelAction = useCallback((action: 'enter' | 'return' | 'contact' | 'avoid' | 'calm', at: Position) => {
     if (!user) {
@@ -993,6 +1070,20 @@ function App() {
               <p className="entry-meta">DAY {entry.worldDay}</p>
               {entry.screenshotUrl && <img src={entry.screenshotUrl} alt={`DAY ${entry.worldDay}の世界`} />}
               {entry.body ? <p>{entry.body}</p> : <p className="entry-silence">この日、神は何も創らなかった。</p>}
+              <button className="history-map-toggle" onClick={() => showHistoryMap(entry.worldDay)}
+                aria-expanded={historyMapDay === entry.worldDay}>
+                {historyMapDay === entry.worldDay ? '地図を閉じる' : 'その日の地図を見る'}
+              </button>
+              {historyMapDay === entry.worldDay && <div className="history-map-panel">
+                {historyMapLoading && <p className="small-text">地図を読み込んでいます。</p>}
+                {historyMapError && <p role="status">{historyMapError}</p>}
+                {historyMap && <>
+                  <HistoryMap snapshot={historyMap.snapshot} />
+                  {historyMapAdditions.length > 0 && <p className="small-text">前日の地図から増えたもの: {historyMapAdditions.slice(0, 5).join('・')}{historyMapAdditions.length > 5 ? ` ほか${historyMapAdditions.length - 5}件` : ''}</p>}
+                  <p className="small-text">{historyMap.source === 'captured' ? '公開時に保存した地図です。'
+                    : '残っている記録から再構成した地図です。'}個人の庭や持ち物は含みません。</p>
+                </>}
+              </div>}
             </article>)}
           </>}
           {panel === 'wish' && <>

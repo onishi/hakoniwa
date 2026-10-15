@@ -111,6 +111,10 @@ button {
 .diary-themes button { border: 2px solid #665d4c; padding: 6px 9px; background: #f7eed6; color: #29251f; font: inherit; cursor: pointer; }
 .diary-themes button.selected { background: #385342; color: #fff9e8; }
 .diary-filter input { box-sizing: border-box; width: 100%; border: 2px solid #665d4c; padding: 9px; background: #fffaf0; font: inherit; }
+.history-map-toggle { border: 2px solid #665d4c; background: #f7eed6; color: #29251f; padding: 7px 10px; font: inherit; cursor: pointer; }
+.history-map-panel { margin-top: 10px; padding: 8px; border: 2px solid #a48d62; background: #d9e1c2; }
+.history-map-panel .small-text { margin: 8px 2px 2px; }
+.history-map { display: block; width: 100%; max-height: 280px; }
 .record-window textarea { width: 100%; min-height: 130px; resize: vertical; padding: 14px; font: inherit; border: 3px solid #665d4c; background: #fffaf0; }
 .consent { display: flex; gap: 9px; margin: 16px 0; font-size: 14px; line-height: 1.6; }
 .consent input { width: 20px; height: 20px; flex: none; }
