@@ -218,6 +218,19 @@ npx wrangler d1 export hakoniwa-db --remote --output=backup-$(date +%Y%m%d).sql
 
 全テーブルのスキーマとデータがSQLとして落ちる。保管先はリポジトリの外にする。
 
+### 共有地図の遷移再現
+
+連続する二つの公開日を取得し、前日のスナップショットから翌日を再現できることを確認する。生成した計画には入出力のSHA-256が入り、別のスナップショットへ誤適用すると失敗する。
+
+```bash
+curl -sS "$PUBLIC_ORIGIN/api/world-history/95" -o day-95.json
+curl -sS "$PUBLIC_ORIGIN/api/world-history/96" -o day-96.json
+python3 scripts/replay_world_transition.py make-plan day-95.json day-96.json --output day-95-to-96.json
+python3 scripts/replay_world_transition.py replay day-95.json day-95-to-96.json --expected day-96.json
+```
+
+この計画は共有地図の変化を再現する。個人状態、日次画像、AIが創造案を作るまでの入力は含まない。
+
 ### 時点への巻き戻し
 
 D1のTime Travelで、過去の時点へ戻せる。まず現在地のブックマークを控える。

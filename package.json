@@ -9,6 +9,7 @@
     "deploy": "npm run build && wrangler deploy",
     "deploy:evolution": "npm run build && wrangler deploy --config wrangler.evolution.jsonc",
     "lint": "eslint .",
+    "test": "node --test worker/*.test.mjs && python3 -m unittest discover -s scripts -p '*_test.py'",
     "preview": "vite preview"
   },
   "dependencies": {
