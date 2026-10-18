@@ -129,17 +129,23 @@ npx wrangler d1 execute hakoniwa-db --remote --command "SELECT key, value FROM w
 npx wrangler d1 execute hakoniwa-db --remote --command "UPDATE world_settings SET value='on' WHERE key='daily_advance'"
 ```
 
-`on` にすると、翌朝のCron（日本時間0:05）から世界日が進む。創造の提案がまだない間、新しい日は沈黙として記録される。
+`on` にすると、翌朝のCron（日本時間0:05）から世界日が進む。創造の提案がまだない間、新しい日は沈黙として記録される。`0024_creation_runs.sql` 以降、この沈黙にも提案内容、決定的シード、前後のSHA-256、採用した遷移操作が `world_creation_runs` に残る。
 
-世界日は `draft` として作られ、その日の仕事が終わったときだけ `published` になる。読み取りAPIは `published` の最新日しか返さないため、日次処理が途中で落ちた日は、観測者には前日の世界が見え続ける。落ちた日を調べるには次を使う。
+自動進行は `draft` の作成、監査記録、沈黙イベント、`published` への切り替えを一つのD1バッチで行う。公開時に固定された共有地図が事前の期待値と異なる場合はバッチ全体がロールバックされる。読み取りAPIは `published` の最新日しか返さないため、日次処理が落ちても観測者には前日の世界が見え続ける。既存または手動作業中の `draft` が残っている場合、自動進行は新しい日を作らず停止する。状態を調べるには次を使う。
 
 ```bash
 npx wrangler d1 execute hakoniwa-db --remote --command "SELECT world_day, status, oracle FROM world_days ORDER BY world_day DESC LIMIT 5"
 ```
 
-`draft` のまま残った日は、原因を直してから手で `published` にするか、行を消して翌日やり直す。**公開済みの日は書き換えない。** 訂正は新しい `creation_events` として足す。
+`draft` のまま残った日は、原因とその日に紐づくデータを確認してから扱いを決める。安易に公開・削除しない。**公開済みの日は書き換えない。** 訂正は新しい `creation_events` として足す。
 
 `0023_world_snapshots.sql` 以降は、`draft` から `published` への切り替えと同時に、その日の共有地図を `world_snapshots` に固定する。新しい日を手で追加するときも、まず `draft` として行と存在・地形を作り、最後に `published` へ切り替える。直接 `published` で追加するとスナップショットは作られない。移行時点ですでに公開されていた日は現在のデータから再構成し、`source=reconstructed` と明示する。
+
+自動進行の監査記録は次で確認する。`proposal_json` と `transition_json` は内部の生成・採用記録であり、公開APIへは出さない。
+
+```bash
+npx wrangler d1 execute hakoniwa-db --remote --command "SELECT world_day, source_world_day, algorithm, status, input_snapshot_sha256, output_snapshot_sha256 FROM world_creation_runs ORDER BY world_day DESC LIMIT 5"
+```
 
 過去日の共有地図は `GET /api/world-history/<日>` で取得できる。個人の庭・持ち物・痕跡、時刻による天候は含まない。復元を試す場合は応答を保存し、既存ファイルを上書きしない一時DBに読み込む。
 
