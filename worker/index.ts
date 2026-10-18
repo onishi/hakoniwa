@@ -1,17 +1,11 @@
 import { launch } from '@cloudflare/playwright'
 import { rainMirrorAvailable, worldClimate } from './climate'
+import { createSilenceCreationRun, type SharedWorldSnapshot } from './world-creation'
 
-interface Env {
-  ASSETS: Fetcher
-  DB: D1Database
-  SCREENSHOTS: R2Bucket
-  BROWSER: Fetcher
-  PUBLIC_ORIGIN: string
+interface Env extends CloudflareBindings {
   GOOGLE_CLIENT_ID: string
   GOOGLE_CLIENT_SECRET: string
   GITHUB_TOKEN: string
-  GITHUB_OWNER: string
-  GITHUB_REPO: string
   APP_MODE?: 'day1' | 'evolution'
 }
 
@@ -501,7 +495,8 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
       const user = await currentUser(request, env)
       if (!user) return json({ error: '庭の記録を始めてください。' }, 401)
       const signals = await gardenSignals(env, user.id, today.world_day)
-      if (!signals.garden || !Number.isInteger(input.x) || !Number.isInteger(input.y) ||
+      if (!signals.garden || typeof input.x !== 'number' || typeof input.y !== 'number' ||
+        !Number.isInteger(input.x) || !Number.isInteger(input.y) ||
         Math.abs(input.x - signals.garden.x) + Math.abs(input.y - signals.garden.y) > 1) {
         return json({ error: '庭の訪問者のそばへ来てください。' }, 409)
       }
@@ -1482,18 +1477,41 @@ async function api(request: Request, env: Env, url: URL): Promise<Response> {
  * observers on yesterday's world rather than on half of today's.
  */
 async function advanceDay(env: Env) {
-  const current = await env.DB.prepare('SELECT world_day FROM world_days ORDER BY world_day DESC LIMIT 1')
-    .first<{ world_day: number }>()
+  const current = await env.DB.prepare('SELECT world_day, status FROM world_days ORDER BY world_day DESC LIMIT 1')
+    .first<{ world_day: number; status: 'draft' | 'published' }>()
   if (!current) return null
+  if (current.status !== 'published') {
+    console.error(JSON.stringify({ event: 'world_advance_blocked', worldDay: current.world_day, status: current.status }))
+    return null
+  }
   const nextDay = current.world_day + 1
 
-  // Nothing proposes creations yet, so every new day is a silence until one does.
-  await env.DB.prepare("INSERT INTO world_days (world_day, oracle, status) VALUES (?, NULL, 'draft')")
-    .bind(nextDay).run()
-  await env.DB.prepare("INSERT INTO creation_events (world_day, kind, payload) VALUES (?, 'silence', '{}')")
-    .bind(nextDay).run()
-  await env.DB.prepare("UPDATE world_days SET status = 'published', published_at = CURRENT_TIMESTAMP WHERE world_day = ?")
-    .bind(nextDay).run()
+  const source = await env.DB.prepare('SELECT snapshot_json AS snapshotJson FROM world_snapshots WHERE world_day = ?')
+    .bind(current.world_day).first<{ snapshotJson: string }>()
+  if (!source) throw new Error(`missing source snapshot for DAY ${current.world_day}`)
+  const run = await createSilenceCreationRun(JSON.parse(source.snapshotJson) as SharedWorldSnapshot, mapSize(nextDay))
+  const transition = JSON.stringify(run.transition)
+
+  // D1 batches are transactional. The final status update invokes the
+  // migration trigger that compares the captured snapshot with this run's
+  // expected output; a mismatch rolls back the draft, event and publication.
+  await env.DB.batch([
+    env.DB.prepare("INSERT INTO world_days (world_day, oracle, status) VALUES (?, NULL, 'draft')")
+      .bind(nextDay),
+    env.DB.prepare(`INSERT INTO world_creation_runs
+      (world_day, source_world_day, algorithm, proposal_json, seed, transition_json,
+        expected_snapshot_json, input_snapshot_sha256, output_snapshot_sha256)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).bind(
+        nextDay, current.world_day, run.algorithm, JSON.stringify(run.proposal), run.seed,
+        transition, JSON.stringify(run.expectedSnapshot), run.transition.beforeSha256, run.transition.afterSha256,
+      ),
+    env.DB.prepare("INSERT INTO creation_events (world_day, kind, payload) VALUES (?, 'silence', ?)")
+      .bind(nextDay, JSON.stringify({ algorithm: run.algorithm, seed: run.seed })),
+    env.DB.prepare("UPDATE world_days SET status = 'published', published_at = CURRENT_TIMESTAMP WHERE world_day = ?")
+      .bind(nextDay),
+    env.DB.prepare(`UPDATE world_creation_runs SET status = 'published', published_at = CURRENT_TIMESTAMP
+      WHERE world_day = ?`).bind(nextDay),
+  ])
 
   return nextDay
 }
@@ -1534,7 +1552,7 @@ export default {
           console.error('advance failed', error)
           return null
         })
-        if (day) console.log('world day advanced', day)
+        if (day) console.log(JSON.stringify({ event: 'world_day_advanced', worldDay: day }))
       }
       // A failed capture must not stop the world; it is logged so the day can be retried.
       await captureToday(env).catch(error => console.error('capture failed', error))

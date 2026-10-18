@@ -10,6 +10,8 @@
     "deploy:evolution": "npm run build && wrangler deploy --config wrangler.evolution.jsonc",
     "lint": "eslint .",
     "test": "node --test worker/*.test.mjs && python3 -m unittest discover -s scripts -p '*_test.py'",
+    "types:worker": "WRANGLER_WRITE_LOGS=false wrangler types worker-configuration.d.ts --config wrangler.jsonc --env-interface CloudflareBindings --include-runtime false",
+    "typecheck:worker": "WRANGLER_WRITE_LOGS=false wrangler types worker-configuration.d.ts --config wrangler.jsonc --env-interface CloudflareBindings --include-runtime false --check && tsc -p tsconfig.worker.json",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -20,6 +22,7 @@
     "vite": "latest"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260918.1",
     "@eslint/js": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",
