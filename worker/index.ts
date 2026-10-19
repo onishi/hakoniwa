@@ -1,6 +1,6 @@
 import { launch } from '@cloudflare/playwright'
 import { rainMirrorAvailable, worldClimate } from './climate'
-import { createSilenceCreationRun, type SharedWorldSnapshot } from './world-creation'
+import { createApprovedProposalRun, createSilenceCreationRun, type SharedWorldSnapshot } from './world-creation'
 
 interface Env extends CloudflareBindings {
   GOOGLE_CLIENT_ID: string
@@ -1489,13 +1489,19 @@ async function advanceDay(env: Env) {
   const source = await env.DB.prepare('SELECT snapshot_json AS snapshotJson FROM world_snapshots WHERE world_day = ?')
     .bind(current.world_day).first<{ snapshotJson: string }>()
   if (!source) throw new Error(`missing source snapshot for DAY ${current.world_day}`)
-  const run = await createSilenceCreationRun(JSON.parse(source.snapshotJson) as SharedWorldSnapshot, mapSize(nextDay))
+  const sourceSnapshot = JSON.parse(source.snapshotJson) as SharedWorldSnapshot
+  const approved = await env.DB.prepare(`SELECT id, proposal_json AS proposalJson FROM world_creation_proposals
+    WHERE target_world_day = ? AND source_world_day = ? AND status = 'approved'`)
+    .bind(nextDay, current.world_day).first<{ id: number; proposalJson: string }>()
+  const run = approved
+    ? await createApprovedProposalRun(sourceSnapshot, mapSize(nextDay), JSON.parse(approved.proposalJson))
+    : await createSilenceCreationRun(sourceSnapshot, mapSize(nextDay))
   const transition = JSON.stringify(run.transition)
 
   // D1 batches are transactional. The final status update invokes the
   // migration trigger that compares the captured snapshot with this run's
   // expected output; a mismatch rolls back the draft, event and publication.
-  await env.DB.batch([
+  const statements: D1PreparedStatement[] = [
     env.DB.prepare("INSERT INTO world_days (world_day, oracle, status) VALUES (?, NULL, 'draft')")
       .bind(nextDay),
     env.DB.prepare(`INSERT INTO world_creation_runs
@@ -1505,13 +1511,43 @@ async function advanceDay(env: Env) {
         nextDay, current.world_day, run.algorithm, JSON.stringify(run.proposal), run.seed,
         transition, JSON.stringify(run.expectedSnapshot), run.transition.beforeSha256, run.transition.afterSha256,
       ),
-    env.DB.prepare("INSERT INTO creation_events (world_day, kind, payload) VALUES (?, 'silence', ?)")
-      .bind(nextDay, JSON.stringify({ algorithm: run.algorithm, seed: run.seed })),
+  ]
+  if (run.proposal.kind === 'creation') {
+    statements[0] = env.DB.prepare("INSERT INTO world_days (world_day, oracle, status) VALUES (?, ?, 'draft')")
+      .bind(nextDay, run.proposal.oracle)
+    for (const operation of run.proposal.operations) {
+      if (operation.kind === 'add_entity') {
+        const entity = operation.value
+        statements.push(env.DB.prepare(`INSERT INTO world_entities
+          (entity_key, kind, x, y, width, height, sprite, label, message, panel, flat, blocks, born_day)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).bind(
+            entity.key, entity.kind, entity.x, entity.y, entity.width, entity.height, entity.sprite,
+            entity.label, entity.message, entity.panel, Number(entity.flat), Number(entity.blocks), nextDay,
+          ))
+      } else {
+        const tile = operation.value
+        statements.push(env.DB.prepare(`INSERT INTO world_tiles
+          (x, y, kind, born_day, elevation, traversal) VALUES (?, ?, ?, ?, ?, ?)`)
+          .bind(tile.x, tile.y, tile.kind, nextDay, tile.elevation, tile.traversal))
+      }
+    }
+    statements.push(env.DB.prepare(`INSERT INTO creation_events (world_day, kind, payload)
+      VALUES (?, 'approved_proposal_applied', ?)`).bind(nextDay,
+        JSON.stringify({ proposalId: approved?.id, algorithm: run.algorithm, seed: run.seed, title: run.proposal.title })))
+  } else {
+    statements.push(env.DB.prepare("INSERT INTO creation_events (world_day, kind, payload) VALUES (?, 'silence', ?)")
+      .bind(nextDay, JSON.stringify({ algorithm: run.algorithm, seed: run.seed })))
+  }
+  statements.push(
     env.DB.prepare("UPDATE world_days SET status = 'published', published_at = CURRENT_TIMESTAMP WHERE world_day = ?")
       .bind(nextDay),
     env.DB.prepare(`UPDATE world_creation_runs SET status = 'published', published_at = CURRENT_TIMESTAMP
       WHERE world_day = ?`).bind(nextDay),
-  ])
+  )
+  if (approved) statements.push(env.DB.prepare(`UPDATE world_creation_proposals
+    SET status = 'applied', applied_at = CURRENT_TIMESTAMP, applied_run_day = ?
+    WHERE id = ? AND status = 'approved'`).bind(nextDay, approved.id))
+  await env.DB.batch(statements)
 
   return nextDay
 }
