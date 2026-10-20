@@ -13,12 +13,16 @@ export type ApprovedCreationProposal = {
   version: 1; kind: 'creation'; title: string; oracle: string | null
   operations: Array<{ kind: 'add_entity'; value: SharedWorldEntity } | { kind: 'add_tile'; value: SharedWorldTile }>
 }
+export type ApprovedSilenceProposal = {
+  version: 1; kind: 'silence'; reason: string; oracle: string | null
+}
+export type ApprovedProposal = ApprovedCreationProposal | ApprovedSilenceProposal
 type TransitionOperation = { kind: 'set_map'; value: SharedWorldSnapshot['map'] }
   | { kind: 'upsert_entity'; value: SharedWorldEntity }
   | { kind: 'upsert_tile'; value: SharedWorldTile }
 export type CreationRun = {
-  algorithm: 'silence-v1' | 'approved-proposal-v1'
-  proposal: { version: 1; kind: 'silence'; reason: 'no-approved-proposal' } | ApprovedCreationProposal
+  algorithm: 'approved-proposal-v1' | 'approved-silence-v1'
+  proposal: ApprovedProposal
   seed: string
   transition: { version: 1; fromDay: number; toDay: number; beforeSha256: string; afterSha256: string; operations: TransitionOperation[] }
   expectedSnapshot: SharedWorldSnapshot
@@ -72,11 +76,22 @@ const exactKeys = (record: Record<string, unknown>, keys: string[]) => {
   if (Object.keys(record).length !== keys.length || keys.some(key => !(key in record))) throw new Error('unexpected proposal fields')
 }
 
-export function parseApprovedCreationProposal(value: unknown, source: SharedWorldSnapshot,
-  targetMap: SharedWorldSnapshot['map']): ApprovedCreationProposal {
+export function parseApprovedProposal(value: unknown, source: SharedWorldSnapshot,
+  targetMap: SharedWorldSnapshot['map']): ApprovedProposal {
   if (!isRecord(value)) throw new Error('proposal must be an object')
+  if (value.version !== 1 || value.kind !== 'creation' && value.kind !== 'silence') {
+    throw new Error('unsupported proposal version or kind')
+  }
+  if (value.kind === 'silence') {
+    exactKeys(value, ['version', 'kind', 'reason', 'oracle'])
+    return {
+      version: 1,
+      kind: 'silence',
+      reason: boundedString(value, 'reason', 500),
+      oracle: value.oracle === null ? null : boundedString(value, 'oracle', 500),
+    }
+  }
   exactKeys(value, ['version', 'kind', 'title', 'oracle', 'operations'])
-  if (value.version !== 1 || value.kind !== 'creation') throw new Error('unsupported proposal version or kind')
   const title = boundedString(value, 'title', 120)
   const oracle = value.oracle === null ? null : boundedString(value, 'oracle', 500)
   if (!Array.isArray(value.operations) || value.operations.length < 1 || value.operations.length > MAX_OPERATIONS) {
@@ -132,47 +147,31 @@ export async function createApprovedProposalRun(source: SharedWorldSnapshot, tar
   rawProposal: unknown): Promise<CreationRun> {
   if (!Number.isInteger(source.worldDay) || source.worldDay < 1) throw new Error('invalid source world day')
   const toDay = source.worldDay + 1
-  const proposal = parseApprovedCreationProposal(rawProposal, source, targetMap)
+  const proposal = parseApprovedProposal(rawProposal, source, targetMap)
   const operations: TransitionOperation[] = []
   if (source.map.width !== targetMap.width || source.map.height !== targetMap.height) operations.push({ kind: 'set_map', value: clone(targetMap) })
   const expectedSnapshot = clone(source)
   expectedSnapshot.worldDay = toDay
   expectedSnapshot.map = clone(targetMap)
-  for (const operation of proposal.operations) {
-    if (operation.kind === 'add_entity') {
-      expectedSnapshot.entities.push(clone(operation.value))
-      operations.push({ kind: 'upsert_entity', value: clone(operation.value) })
-    } else {
-      expectedSnapshot.tiles.push(clone(operation.value))
-      operations.push({ kind: 'upsert_tile', value: clone(operation.value) })
+  if (proposal.kind === 'creation') {
+    for (const operation of proposal.operations) {
+      if (operation.kind === 'add_entity') {
+        expectedSnapshot.entities.push(clone(operation.value))
+        operations.push({ kind: 'upsert_entity', value: clone(operation.value) })
+      } else {
+        expectedSnapshot.tiles.push(clone(operation.value))
+        operations.push({ kind: 'upsert_tile', value: clone(operation.value) })
+      }
     }
   }
   const orderedExpectedSnapshot = sqlProjectionOrder(expectedSnapshot)
   const beforeSha256 = await snapshotSha256(source)
   const afterSha256 = await snapshotSha256(orderedExpectedSnapshot)
-  const seed = await sha256(canonicalJson({ algorithm: 'approved-proposal-v1', fromDay: source.worldDay, toDay, beforeSha256, proposal }))
+  const algorithm = proposal.kind === 'creation' ? 'approved-proposal-v1' : 'approved-silence-v1'
+  const seed = await sha256(canonicalJson({ algorithm, fromDay: source.worldDay, toDay, beforeSha256, proposal }))
   return {
-    algorithm: 'approved-proposal-v1', proposal, seed,
+    algorithm, proposal, seed,
     transition: { version: 1, fromDay: source.worldDay, toDay, beforeSha256, afterSha256, operations },
     expectedSnapshot: orderedExpectedSnapshot,
-  }
-}
-
-export async function createSilenceCreationRun(source: SharedWorldSnapshot,
-  targetMap: SharedWorldSnapshot['map']): Promise<CreationRun> {
-  if (!Number.isInteger(source.worldDay) || source.worldDay < 1) throw new Error('invalid source world day')
-  const toDay = source.worldDay + 1
-  const proposal = { version: 1, kind: 'silence', reason: 'no-approved-proposal' } as const
-  const operations: TransitionOperation[] = []
-  if (source.map.width !== targetMap.width || source.map.height !== targetMap.height) operations.push({ kind: 'set_map', value: clone(targetMap) })
-  const expectedSnapshot = clone(source)
-  expectedSnapshot.worldDay = toDay
-  expectedSnapshot.map = clone(targetMap)
-  const beforeSha256 = await snapshotSha256(source)
-  const afterSha256 = await snapshotSha256(expectedSnapshot)
-  const seed = await sha256(canonicalJson({ algorithm: 'silence-v1', fromDay: source.worldDay, toDay, beforeSha256, proposal }))
-  return {
-    algorithm: 'silence-v1', proposal, seed,
-    transition: { version: 1, fromDay: source.worldDay, toDay, beforeSha256, afterSha256, operations }, expectedSnapshot,
   }
 }
