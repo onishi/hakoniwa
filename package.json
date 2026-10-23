@@ -22,7 +22,7 @@
     "vite": "latest"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^5.20260918.1",
+    "@cloudflare/workers-types": "^5.20261019.1",
     "@eslint/js": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",
@@ -30,8 +30,8 @@
     "eslint-plugin-react-hooks": "latest",
     "eslint-plugin-react-refresh": "latest",
     "globals": "latest",
-    "typescript": "latest",
+    "typescript": "^6.0.3",
     "typescript-eslint": "latest",
-    "wrangler": "4.135.0"
+    "wrangler": "4.151.2"
   }
 }
