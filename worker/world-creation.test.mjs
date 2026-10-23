@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { createApprovedProposalRun, createSilenceCreationRun, snapshotSha256 } from './world-creation.ts'
+import { createApprovedProposalRun, snapshotSha256 } from './world-creation.ts'
 
 const snapshot = {
   worldDay: 20,
@@ -15,21 +15,10 @@ const snapshot = {
   ],
 }
 
-test('silence creates a repeatable audited transition', async () => {
-  const first = await createSilenceCreationRun(snapshot, snapshot.map)
-  const second = await createSilenceCreationRun(snapshot, snapshot.map)
-
-  assert.deepEqual(first, second)
-  assert.equal(first.transition.fromDay, 20)
-  assert.equal(first.transition.toDay, 21)
-  assert.deepEqual(first.transition.operations, [])
-  assert.equal(first.expectedSnapshot.worldDay, 21)
-  assert.match(first.seed, /^[0-9a-f]{64}$/)
-})
-
-test('implicit map expansion is recorded as an operation', async () => {
+test('approved silence records implicit map expansion as an operation', async () => {
   const day21 = { ...snapshot, worldDay: 21 }
-  const run = await createSilenceCreationRun(day21, { width: 16, height: 16 })
+  const run = await createApprovedProposalRun(day21, { width: 16, height: 16 },
+    { version: 1, kind: 'silence', reason: '地図の境界だけを広げる', oracle: null })
 
   assert.deepEqual(run.transition.operations, [
     { kind: 'set_map', value: { width: 16, height: 16 } },
@@ -90,4 +79,31 @@ test('approved proposal rejects collisions, unknown fields, and out-of-map entit
   outside.operations[0].value.x = 10
   outside.operations[0].value.width = 2
   await assert.rejects(createApprovedProposalRun(snapshot, snapshot.map, outside), /outside map/)
+})
+
+test('approved silence advances deterministically without changing world contents', async () => {
+  const silence = { version: 1, kind: 'silence', reason: '人間が変化を見送った日', oracle: null }
+  const run = await createApprovedProposalRun(snapshot, snapshot.map, silence)
+  const repeated = await createApprovedProposalRun(snapshot, snapshot.map, silence)
+
+  assert.deepEqual(run, repeated)
+  assert.equal(run.algorithm, 'approved-silence-v1')
+  assert.deepEqual(run.proposal, silence)
+  assert.deepEqual(run.transition.operations, [])
+  assert.equal(run.expectedSnapshot.worldDay, 21)
+  assert.deepEqual(run.expectedSnapshot.entities, snapshot.entities)
+  assert.deepEqual(run.expectedSnapshot.tiles, [...snapshot.tiles].sort((left, right) => left.x - right.x))
+  assert.match(run.seed, /^[0-9a-f]{64}$/)
+})
+
+test('approved silence rejects missing reasons and extra fields', async () => {
+  await assert.rejects(
+    createApprovedProposalRun(snapshot, snapshot.map, { version: 1, kind: 'silence', reason: '', oracle: null }),
+    /invalid reason/,
+  )
+  await assert.rejects(
+    createApprovedProposalRun(snapshot, snapshot.map,
+      { version: 1, kind: 'silence', reason: '見送る', oracle: null, operations: [] }),
+    /unexpected proposal fields/,
+  )
 })

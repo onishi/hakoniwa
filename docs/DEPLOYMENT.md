@@ -119,19 +119,19 @@ curl -I https://<worker-url>.workers.dev
 
 世界はD1にあり、`world_settings.daily_advance` が世界日の自動進行を握っている。初日を公開するまでは `off` にしておく。この間、Cronは画像の撮り直しだけを行い、世界日は進まない。
 
-**Day 1を基準として保ち、Day 5・10の候補を先に試す間は、本番の設定を `off` のままにする。** 下の `on` への変更は現行機能の説明であり、検証済み候補の承認・公開を行う手順ではない。実際にDay 2を公開する前に、[開発検証と公開ゲート](DEVELOPMENT_VALIDATION.md) を実装・実証する。
+**Day 1を基準として保ち、Day 2の候補を承認するまでは本番の設定を `off` のままにする。** `on` にしても、直前の公開日に対応する承認済み提案がなければ世界日は進まない。実際にDay 2を公開する前に、[開発検証](DEVELOPMENT_VALIDATION.md) に従って候補を実証・承認する。
 
 ```bash
 # 今の状態を見る
 npx wrangler d1 execute hakoniwa-db --remote --command "SELECT key, value FROM world_settings"
 
-# 公開ゲートを実装・検証し、承認済みの日を自動進行させる場合だけ実行する
+# 承認済みの日を次のCronで公開する場合だけ実行する
 npx wrangler d1 execute hakoniwa-db --remote --command "UPDATE world_settings SET value='on' WHERE key='daily_advance'"
 ```
 
-`on` にすると、翌朝のCron（日本時間0:05）から世界日が進む。創造の提案がまだない間、新しい日は沈黙として記録される。`0024_creation_runs.sql` 以降、この沈黙にも提案内容、決定的シード、前後のSHA-256、採用した遷移操作が `world_creation_runs` に残る。
+`on` にすると、翌朝のCron（日本時間0:05）が承認済み提案を探す。提案がなければ前日の公開世界を維持する。何も創らない日を進める場合も、`kind=silence` の理由を人間が承認して投入する。創造・沈黙のどちらも、提案内容、決定的シード、前後のSHA-256、採用した遷移操作が `world_creation_runs` に残る。
 
-自動進行は `draft` の作成、監査記録、沈黙イベント、`published` への切り替えを一つのD1バッチで行う。公開時に固定された共有地図が事前の期待値と異なる場合はバッチ全体がロールバックされる。読み取りAPIは `published` の最新日しか返さないため、日次処理が落ちても観測者には前日の世界が見え続ける。既存または手動作業中の `draft` が残っている場合、自動進行は新しい日を作らず停止する。状態を調べるには次を使う。
+自動進行は提案の再確認、`draft` の作成、監査記録、イベント、`published` への切り替え、提案の適用済み化を一つのD1バッチで行う。公開時に固定された共有地図が事前の期待値と異なる場合や、開始前に提案が変更・却下された場合はバッチ全体がロールバックされる。読み取りAPIは `published` の最新日しか返さないため、日次処理が落ちても観測者には前日の世界が見え続ける。既存または手動作業中の `draft` が残っている場合も新しい日を作らず停止する。状態を調べるには次を使う。
 
 ```bash
 npx wrangler d1 execute hakoniwa-db --remote --command "SELECT world_day, status, oracle FROM world_days ORDER BY world_day DESC LIMIT 5"
